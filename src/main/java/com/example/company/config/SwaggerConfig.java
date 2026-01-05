@@ -10,9 +10,6 @@ public class SwaggerConfig {
 
     @Bean
     public OpenAPI customOpenAPI() {
-        return new OpenAPI()
-                .info(new Info()
-                        .title("Currency Service API")
-                        .description("API for managing and retrieving currencies"));
+        return new OpenAPI().info(new Info().title("POC Service API").description("API"));
     }
 }
