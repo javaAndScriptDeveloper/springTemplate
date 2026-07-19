@@ -1,0 +1,2 @@
+# Run `sdk env install` then `sdk env` to match the project's JDK.
+java=25-tem

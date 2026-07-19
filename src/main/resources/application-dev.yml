@@ -1,0 +1,15 @@
+# Local development profile. Activate with SPRING_PROFILES_ACTIVE=dev (or `make dev`, which uses Testcontainers).
+spring:
+  jpa:
+    # Flip to true to see the SQL Hibernate runs; kept off by default to keep logs readable.
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+logging:
+  level:
+    root: INFO
+    com.example.company: DEBUG
+    # Uncomment to inspect the SQL parameter bindings:
+    # org.hibernate.orm.jdbc.bind: TRACE

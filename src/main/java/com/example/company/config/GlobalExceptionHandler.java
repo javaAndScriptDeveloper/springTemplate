@@ -1,50 +1,51 @@
 package com.example.company.config;
 
-import com.example.company.dto.response.ErrorResponse;
 import com.example.company.exception.ApplicationException;
 import java.util.HashMap;
-import java.util.Map;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
+import org.springframework.http.ProblemDetail;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.client.RestClientException;
 
+/**
+ * Translates exceptions into RFC 9457 {@link ProblemDetail} responses (served as {@code application/problem+json}).
+ */
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-    private static final String DEFAULT_ERROR_MESSAGE = "Something went wrong";
-
-    @ExceptionHandler(value = ApplicationException.class)
-    public ResponseEntity<ErrorResponse<String>> applicationException(ApplicationException applicationException) {
-        return ResponseEntity.status(applicationException.getHttpStatus())
-                .body(ErrorResponse.<String>builder()
-                        .message(applicationException.getErrorMessageOptional().orElse(DEFAULT_ERROR_MESSAGE))
-                        .build());
+    @ExceptionHandler(ApplicationException.class)
+    public ProblemDetail handleApplicationException(ApplicationException ex) {
+        log.debug("Application error: {}", ex.getMessage());
+        return ProblemDetail.forStatusAndDetail(ex.getStatus(), ex.getMessage());
     }
 
-    @ExceptionHandler(value = MethodArgumentNotValidException.class)
-    public ResponseEntity<ErrorResponse<Map<String, String>>> methodArgumentNotValidException(
-            MethodArgumentNotValidException methodArgumentNotValidException) {
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ProblemDetail handleValidation(MethodArgumentNotValidException ex) {
         var errors = new HashMap<String, String>();
-        methodArgumentNotValidException.getBindingResult().getAllErrors().forEach(error -> {
-            var fieldName = ((FieldError) error).getField();
-            String errorMessage = error.getDefaultMessage();
-            errors.put(fieldName, errorMessage);
-        });
-        return ResponseEntity.status(methodArgumentNotValidException.getStatusCode())
-                .body(ErrorResponse.<Map<String, String>>builder()
-                        .message(errors)
-                        .build());
+        for (var error : ex.getBindingResult().getAllErrors()) {
+            var field = error instanceof FieldError fieldError ? fieldError.getField() : error.getObjectName();
+            errors.put(field, error.getDefaultMessage());
+        }
+        var problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, "Request validation failed");
+        problem.setProperty("errors", errors);
+        return problem;
     }
 
-    @ExceptionHandler(value = RestClientException.class)
-    public ResponseEntity<ErrorResponse<String>> applicationException(RestClientException restClientException) {
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ErrorResponse.<String>builder()
-                        .message("Api provider is currently unavailable: " + restClientException.getMessage())
-                        .build());
+    @ExceptionHandler(RestClientException.class)
+    public ProblemDetail handleRestClientException(RestClientException ex) {
+        log.error("Upstream API call failed", ex);
+        return ProblemDetail.forStatusAndDetail(
+                HttpStatus.BAD_GATEWAY, "Upstream API is currently unavailable: " + ex.getMessage());
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ProblemDetail handleUnexpected(Exception ex) {
+        log.error("Unhandled exception", ex);
+        return ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR, "Something went wrong");
     }
 }

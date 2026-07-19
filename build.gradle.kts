@@ -1,22 +1,26 @@
 plugins {
     id("java")
-    id("org.springframework.boot") version "3.4.0"
+    id("jacoco")
+    id("org.springframework.boot") version "4.1.0"
     id("io.spring.dependency-management") version "1.1.7"
-    id("com.diffplug.spotless") version "7.0.0"
+    id("com.diffplug.spotless") version "7.2.1"
 }
 
 group = "com.example.company"
 version = "0.0.1-SNAPSHOT"
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_21
+    toolchain {
+        // Gradle auto-provisions this JDK via the foojay resolver (settings.gradle.kts)
+        languageVersion = JavaLanguageVersion.of(25)
+    }
 }
 
 repositories {
     mavenCentral()
 }
 
-extra["springCloudVersion"] = "2024.0.0"
+extra["springCloudVersion"] = "2025.1.2"
 
 dependencies {
     // Lombok
@@ -29,20 +33,24 @@ dependencies {
     annotationProcessor("org.mapstruct:mapstruct-processor:1.6.3")
 
     // Spring Boot Starters
-    implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
-    implementation("org.springframework.boot:spring-boot-starter-aop")
     implementation("org.springframework.boot:spring-boot-starter-cache")
+    // Caffeine backs the cache abstraction above (starter-cache alone only ships a simple in-memory map)
+    implementation("com.github.ben-manes.caffeine:caffeine")
+
+    // AOP: Boot 4 dropped spring-boot-starter-aop; spring-aspects pulls AspectJ + enables @Aspect support
+    implementation("org.springframework:spring-aspects")
 
     // Spring Cloud
-    implementation(platform("org.springframework.cloud:spring-cloud-dependencies:${property("springCloudVersion")}"))
     implementation("org.springframework.cloud:spring-cloud-starter-openfeign")
+    // Resilience4j circuit breaker + retry, integrated with Feign via feign.circuitbreaker.enabled
+    implementation("org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j")
 
-    // API Documentation
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.0")
+    // API Documentation (OpenAPI 3 / Swagger UI)
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
 
     // Database Migration
     implementation("org.liquibase:liquibase-core")
@@ -50,22 +58,38 @@ dependencies {
     // PostgreSQL Driver
     runtimeOnly("org.postgresql:postgresql")
 
-    // H2 Database (for testing)
-    runtimeOnly("com.h2database:h2")
+    // Local development: manage docker-compose.yml lifecycle automatically on bootRun
+    developmentOnly("org.springframework.boot:spring-boot-docker-compose")
 
-    // Test Dependencies
+    // Test Dependencies (JUnit 5, AssertJ, Mockito, JSONassert ship with starter-test)
     testCompileOnly("org.projectlombok:lombok")
     testAnnotationProcessor("org.projectlombok:lombok")
     testImplementation("org.springframework.boot:spring-boot-starter-test")
-    testImplementation("io.qameta.allure:allure-junit5:2.29.1")
-    testImplementation("org.assertj:assertj-core:3.27.3")
-    testImplementation("org.jeasy:easy-random-core:5.0.0")
+    // Boot 4 split MockMvc test support (@AutoConfigureMockMvc) into its own module
+    testImplementation("org.springframework.boot:spring-boot-webmvc-test")
+
+    // Integration testing against a real PostgreSQL via Testcontainers
+    testImplementation("org.springframework.boot:spring-boot-testcontainers")
+    testImplementation("org.testcontainers:junit-jupiter")
+    testImplementation("org.testcontainers:postgresql")
+
+    // Random, fully-populated test objects — the project convention over hand-built fixtures
+    testImplementation("org.instancio:instancio-junit:5.4.1")
+    // Architecture rules enforced as tests (layering, naming, no field injection)
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.4.2")
 }
 
 dependencyManagement {
     imports {
         mavenBom("org.springframework.cloud:spring-cloud-dependencies:${property("springCloudVersion")}")
+        // Boot 4.1 no longer manages Testcontainers versions; pin them via the Testcontainers BOM.
+        mavenBom("org.testcontainers:testcontainers-bom:1.21.4")
     }
+}
+
+// Populate /actuator/info with build metadata
+springBoot {
+    buildInfo()
 }
 
 tasks.withType<JavaCompile> {
@@ -77,6 +101,43 @@ tasks.withType<Test> {
     useJUnitPlatform()
     systemProperty("junit.jupiter.extensions.autodetection.enabled", true)
     systemProperty("file.encoding", "UTF-8")
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+// Classes with no meaningful branches to cover — excluded from the coverage report and gate.
+val coverageExclusions = listOf("com/example/company/Application.class", "com/example/company/config/**")
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required = true
+        html.required = true
+    }
+    classDirectories.setFrom(
+        classDirectories.files.map {
+            fileTree(it) { exclude(coverageExclusions) }
+        },
+    )
+}
+
+tasks.jacocoTestCoverageVerification {
+    classDirectories.setFrom(
+        classDirectories.files.map {
+            fileTree(it) { exclude(coverageExclusions) }
+        },
+    )
+    violationRules {
+        rule {
+            limit {
+                // Bootstrap threshold: this is a near-empty template. Raise it as domain code lands.
+                minimum = "0.0".toBigDecimal()
+            }
+        }
+    }
+}
+
+tasks.check {
+    dependsOn(tasks.jacocoTestCoverageVerification)
 }
 
 spotless {
@@ -87,5 +148,9 @@ spotless {
         removeUnusedImports()
         trimTrailingWhitespace()
         endWithNewline()
+    }
+    kotlinGradle {
+        target("*.gradle.kts")
+        ktlint()
     }
 }

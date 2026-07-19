@@ -1,20 +1,49 @@
-version: '3.9'
-
+# Local infrastructure.
+#
+# - `db` starts by default. spring-boot-docker-compose manages it on `./gradlew bootRun`
+#   and auto-configures the datasource, so you rarely start it by hand.
+# - `app` runs the built image and is gated behind the `full` profile, so it is NOT started
+#   by bootRun's docker-compose integration. Bring up the whole stack with `make up`
+#   (see the Makefile) or: docker compose --env-file .env.example --profile full up --build
+#
+# Tests use their own throwaway PostgreSQL via Testcontainers — no service here for them.
 services:
-  main-db:
-    image: bitnami/postgresql:latest
-    container_name: poc-db
+  db:
+    image: postgres:17-alpine
+    container_name: app-db
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     environment:
-      POSTGRES_PASSWORD: password
-      POSTGRESQL_DATABASE: poc
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-app}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
-  test-db:
-    image: bitnami/postgresql:latest
-    container_name: poc-test-db
+  app:
+    profiles: ["full"]
+    build:
+      context: .
+    container_name: app
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
-      - "5433:5432"
+      - "${SERVER_PORT:-8080}:8080"
     environment:
-      POSTGRES_PASSWORD: password
-      POSTGRESQL_DATABASE: poc
+      APP_NAME: ${APP_NAME:-spring-template}
+      SERVER_PORT: 8080
+      SPRING_PROFILES_ACTIVE: prod
+      # Reach the database by its compose service name, not localhost.
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-app}
+      DB_USERNAME: ${POSTGRES_USER:-app}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-app}
+    restart: unless-stopped
+
+volumes:
+  db-data:

@@ -1,0 +1,10 @@
+.git
+.gradle
+.idea
+build
+!build/libs/*.jar
+*.iml
+*.log
+.DS_Store
+README.md
+docker-compose.yml

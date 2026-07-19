@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":dependencyDashboard",
+    ":semanticCommits"
+  ],
+  "configMigration": true,
+  "timezone": "Europe/Kyiv",
+  "schedule": ["before 6am on monday"],
+  "labels": ["dependencies"],
+  "packageRules": [
+    {
+      "description": "Group all Spring Boot / Spring Cloud upgrades together",
+      "matchPackageNames": ["/^org.springframework/"],
+      "groupName": "spring"
+    },
+    {
+      "description": "Auto-merge safe patch/minor updates once CI is green",
+      "matchUpdateTypes": ["minor", "patch"],
+      "automerge": true
+    }
+  ]
+}

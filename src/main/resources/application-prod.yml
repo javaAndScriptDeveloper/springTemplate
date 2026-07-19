@@ -1,0 +1,25 @@
+# Production profile. Activate with SPRING_PROFILES_ACTIVE=prod (set on the `app` container in docker-compose.yml).
+spring:
+  datasource:
+    hikari:
+      # Fail fast rather than block callers when the pool is exhausted or the DB is unreachable.
+      connection-timeout: 3000
+      idle-timeout: 300000
+      max-lifetime: 1200000
+      # Log a stack trace when a connection is held longer than this — catches leaks in prod.
+      leak-detection-threshold: 30000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Trim the surface area in prod; drop what you don't scrape.
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+
+logging:
+  level:
+    root: INFO
+    com.example.company: INFO

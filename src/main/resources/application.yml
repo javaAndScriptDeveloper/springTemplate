@@ -1,9 +1,93 @@
 spring:
+  application:
+    name: ${APP_NAME:spring-template}
+
   datasource:
-    url: jdbc:postgresql://localhost:5432/poc
-    username: postgres
-    password: password
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/app}
+    username: ${DB_USERNAME:app}
+    password: ${DB_PASSWORD:app}
+    hikari:
+      pool-name: app-cp
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+
+  jpa:
+    open-in-view: false
+    hibernate:
+      # Schema is owned by Liquibase; Hibernate only validates it matches the entities.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc.time_zone: UTC
+
   liquibase:
     change-log: classpath:/db/changelog/db.changelog-master.yaml
-    drop-first: false
 
+  cache:
+    type: caffeine
+    # Declare the cache names up front so @Cacheable misses fail fast instead of creating caches lazily.
+    cache-names: default
+    caffeine:
+      spec: maximumSize=500,expireAfterWrite=5m
+
+  cloud:
+    openfeign:
+      client:
+        config:
+          default:
+            connect-timeout: 2000
+            read-timeout: 5000
+      circuitbreaker:
+        # Wrap every Feign call in a Resilience4j circuit breaker; enables per-client fallbacks.
+        enabled: true
+
+  # spring-boot-docker-compose starts docker-compose.yml automatically on `bootRun`.
+  docker:
+    compose:
+      enabled: true
+      lifecycle-management: start-and-stop
+
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+  error:
+    include-message: never
+    include-stacktrace: never
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      # No security is wired in this template, so expose details directly. Switch to when-authorized once you add auth.
+      show-details: always
+      probes:
+        enabled: true
+  info:
+    env:
+      enabled: true
+
+# Sensible defaults applied to every Resilience4j instance; Feign clients pick these up by client name.
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-size: 20
+        failure-rate-threshold: 50
+        wait-duration-in-open-state: 10s
+        permitted-number-of-calls-in-half-open-state: 5
+  retry:
+    configs:
+      default:
+        max-attempts: 3
+        wait-duration: 500ms
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    root: INFO
+    com.example.company: DEBUG

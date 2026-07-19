@@ -1,8 +1,17 @@
 spring:
-  datasource:
-    url: jdbc:postgresql://localhost:5433/poc
-    username: postgres
-    password: password
+  # Datasource is provided at runtime by Testcontainers via @ServiceConnection (see TestcontainersConfiguration).
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
   liquibase:
     change-log: classpath:/db/changelog/db.changelog-master.yaml
-    drop-first: true
+  # Tests own their PostgreSQL through Testcontainers, so the docker-compose integration stays off.
+  docker:
+    compose:
+      enabled: false
+
+logging:
+  level:
+    org.testcontainers: INFO
+    com.github.dockerjava: WARN
