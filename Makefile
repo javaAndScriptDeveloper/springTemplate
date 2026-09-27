@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help run dev test build format check db-up db-down up down image clean
+.PHONY: help run dev test itest build format check lock db-up db-down up down image clean
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
@@ -13,8 +13,14 @@ run: ## Run the app (auto-starts docker-compose DB)
 dev: ## Run with a throwaway Testcontainers DB (no docker-compose needed)
 	./gradlew bootTestRun
 
-test: ## Run unit + integration tests (needs Docker for Testcontainers)
+test: ## Run unit tests (no Docker needed)
 	./gradlew test
+
+itest: ## Run integration tests (Testcontainers; one Postgres per fork)
+	./gradlew integrationTest
+
+lock: ## Refresh gradle.lockfile after changing dependencies
+	./gradlew dependencies --write-locks -q
 
 build: ## Full build incl. tests and formatting check
 	./gradlew build

@@ -1,4 +1,4 @@
-package com.example.company;
+package com.example.company.unit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.instancio.Select.field;
