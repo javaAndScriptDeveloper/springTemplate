@@ -9,7 +9,7 @@
 # Tests never use this file: Testcontainers gives each fork its own PostgreSQL.
 services:
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     ports:
       - "127.0.0.1:${DB_PORT:-5432}:5432"
     environment:
