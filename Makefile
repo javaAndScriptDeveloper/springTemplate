@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean observability-up observability-down \
-	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-restore prod-rollback grafana-push grafana-push-cloud grafana-pull vps-ssh vps-ps vps-logs vps-status vps-psql vps-datagrip rename
+	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-backup-status prod-backup-list prod-restore prod-rollback grafana-push grafana-push-cloud grafana-pull vps-ssh vps-ps vps-logs vps-status vps-backup-status vps-psql vps-datagrip rename
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
@@ -94,6 +94,9 @@ vps-logs: ## Tail production logs (SERVICE=app)
 vps-status: ## Image tag per replica and what /version answers
 	scripts/vps.sh deploy-status
 
+vps-backup-status: ## Backup freshness on the VPS, checked from this machine
+	scripts/vps.sh backup-status
+
 vps-psql: ## psql into the production database through an SSH tunnel (SQL="select 1" for one statement)
 	scripts/vps.sh psql $(if $(SQL),"$(SQL)")
 
@@ -126,14 +129,29 @@ prod-pull: ## Pull the current APP_IMAGE_TAG now instead of waiting for Watchtow
 	$(PROD) pull app
 	$(PROD) up -d app
 
-prod-backup-now: ## Run one pg_dump immediately (see deploy/backup)
-	$(PROD) run --rm backup once
+prod-backup-now: ## Run one off-host backup now (needs rclone set up, docs/deployment.md §6)
+	$(PROD) --profile backup run --rm backup once
 
-prod-restore: ## Restore a dump: make prod-restore FILE=deploy/backups/<stamp>.dump  (stops app replicas first)
-	@test -n "$(FILE)" || (echo "usage: make prod-restore FILE=deploy/backups/<stamp>.dump" && exit 1)
-	$(PROD) stop app
-	$(PROD) exec -T db sh -c 'pg_restore --clean --if-exists --no-owner -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < $(FILE)
-	$(PROD) start app
+prod-backup-status: ## Age of the last successful off-host backup; fails if older than BACKUP_MAX_AGE_HOURS
+	$(PROD) --profile backup run --rm backup status
+
+prod-backup-list: ## Database dumps on the backup remote, oldest first (stamps for prod-restore)
+	$(PROD) --profile backup run --rm backup list
+
+prod-restore: ## Restore the DB from the backup remote: make prod-restore STAMP=<stamp|latest>  (asks; CONFIRM=yes skips)
+	@test -n "$(STAMP)" || { echo "usage: make prod-restore STAMP=<stamp|latest>   (stamps: make prod-backup-list)"; exit 1; }
+	@if [ "$(CONFIRM)" != yes ]; then \
+		printf 'Overwrite the production database with backup %s? A safety dump is uploaded first. Type yes: ' "$(STAMP)"; \
+		read answer || true; \
+		[ "$$answer" = yes ] || { echo "aborted"; exit 1; }; \
+	fi
+	@# Watchtower is stopped only if it was running (a prod-rollback pin keeps it stopped), so it cannot recreate a
+	@# replica mid-restore. Both come back even when the restore fails; the target still fails then.
+	@wt="$$($(PROD) ps --status running --services | grep -x watchtower || true)"; \
+		$(PROD) stop app $$wt; \
+		$(PROD) --profile backup run --rm -e RESTORE_CONFIRM=yes backup restore $(STAMP); rc=$$?; \
+		$(PROD) start app $$wt; \
+		exit $$rc
 
 prod-rollback: ## Pin the app to an earlier image: make prod-rollback TAG=1.4.1  (pauses Watchtower)
 	@test -n "$(TAG)" || (echo "usage: make prod-rollback TAG=<version|sha-xxxxxxx>" && exit 1)
