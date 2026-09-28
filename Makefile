@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help run dev test itest build format check lock db-up db-down up down image clean
+.PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
@@ -7,13 +7,16 @@ ENV_FILE := $(if $(wildcard .env),.env,.env.example)
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-run: ## Run the app (auto-starts docker-compose DB)
+setup: ## One-time: install the commit-msg hook that enforces conventional commits
+	@git config core.hooksPath .githooks && echo "git hooks: .githooks (commit-msg enforces conventional commits)"
+
+run: setup ## Run the app (auto-starts the compose DB)
 	./gradlew bootRun
 
 dev: ## Run with a throwaway Testcontainers DB (no docker-compose needed)
 	./gradlew bootTestRun
 
-test: ## Run unit tests (no Docker needed)
+test: setup ## Run unit tests (no Docker needed)
 	./gradlew test
 
 itest: ## Run integration tests (Testcontainers; one Postgres per fork)
@@ -22,7 +25,13 @@ itest: ## Run integration tests (Testcontainers; one Postgres per fork)
 lock: ## Refresh gradle.lockfile after changing dependencies
 	./gradlew dependencies --write-locks -q
 
-build: ## Full build incl. tests and formatting check
+release-name: ## Print the version the next push to main would release
+	@scripts/next-version.sh
+
+test-scripts: ## Run the bash script tests under scripts/tests
+	scripts/tests/run.sh
+
+build: setup ## Full build incl. tests and formatting check
 	./gradlew build
 
 format: ## Auto-format the codebase
