@@ -82,6 +82,16 @@ if "${mk[@]}" prod-restore STAMP=2026 CONFIRM=yes >/dev/null 2>&1; then
 fi
 [[ -s "$COMPOSE_LOG" ]] && fail "compose called with a malformed STAMP: $(cat "$COMPOSE_LOG")"
 
+# STAMP carrying a command substitution: quoting alone does not stop backticks, so the recipe must
+# read STAMP from the shell environment ($$STAMP), never paste it into shell text via $(STAMP).
+: > "$COMPOSE_LOG"
+marker="$tmp/backticked"
+if "${mk[@]}" prod-restore "STAMP=latest\`touch $marker\`" CONFIRM=yes >/dev/null 2>&1; then
+  fail "restore exited 0 with a backtick STAMP"
+fi
+[[ -e "$marker" ]] && fail "STAMP backticks were executed by the shell: marker file created"
+[[ -s "$COMPOSE_LOG" ]] && fail "compose called with a backtick STAMP: $(cat "$COMPOSE_LOG")"
+
 # Backup verbs force the profile, so they work on a host whose .env.prod does not enable it.
 for pair in now:once status:status list:list; do
   : > "$COMPOSE_LOG"
