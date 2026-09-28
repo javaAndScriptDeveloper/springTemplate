@@ -1,147 +1,132 @@
-# Spring Boot Service Template
+# spring-template
 
-A modern, batteries-included starting point for Java Spring Boot services. Clone it, rename the base
-package, and start building — the tedious infrastructure is already wired up.
+Spring Boot service template for a solo project that ships to one VPS. Clone, rename, push: CI publishes a versioned
+image, the server pulls it and rolls the replicas, Grafana shows the release. Local run needs no configuration.
 
-## Stack
+| Concern | Choice |
+|---|---|
+| Runtime | Java 25, Spring Boot 4.1, Gradle 9.6 (Kotlin DSL) |
+| Data | PostgreSQL 17, Spring Data JPA, Liquibase owns the schema (`ddl-auto: validate`) |
+| HTTP clients | OpenFeign wrapped in a Resilience4j circuit breaker, redacted request logging |
+| API | RFC 9457 `ProblemDetail` errors, springdoc Swagger UI (`/swagger-ui.html`, off in prod) |
+| Caching | Spring Cache with Caffeine |
+| Tests | JUnit 5, Testcontainers (one Postgres per fork), Instancio, ArchUnit, JaCoCo gate 60 % |
+| Ops | `/version`, actuator on a private management port, `app_build_info` metric, graceful shutdown |
+| Delivery | GitHub Actions → GHCR + GitHub Release → Watchtower rolling restart behind Caddy |
+| Observability | Micrometer → Grafana Alloy → Grafana Cloud (prod) / Prometheus + Grafana (local) |
+| Hygiene | Spotless, Dependabot, gitleaks, trivy, zizmor, conventional commits, SemVer from history |
 
-| Concern            | Choice                                                            |
-|--------------------|-------------------------------------------------------------------|
-| Language / runtime | Java 25 (LTS), auto-provisioned via Gradle toolchains             |
-| Framework          | Spring Boot 4.1 (Spring Framework 7)                              |
-| Build              | Gradle 9.6 (Kotlin DSL) + version-aligned Spring Cloud            |
-| Persistence        | Spring Data JPA + PostgreSQL, schema managed by Liquibase         |
-| API docs           | springdoc-openapi (Swagger UI at `/swagger-ui.html`)             |
-| Mapping / boilerplate | MapStruct + Lombok                                            |
-| HTTP clients       | Spring Cloud OpenFeign + Resilience4j (circuit breaker, retry)   |
-| Caching            | Spring Cache abstraction backed by Caffeine                      |
-| Errors             | RFC 9457 `ProblemDetail` responses                               |
-| Testing            | JUnit 5 + Testcontainers (real PostgreSQL), Instancio, ArchUnit  |
-| Ops                | Actuator (health/info/metrics/prometheus), graceful shutdown     |
-| Tooling            | Spotless (Palantir format), JaCoCo, GitHub Actions CI, Renovate, Docker |
-
-## Prerequisites
-
-- **JDK 25** — or nothing at all; Gradle downloads the right JDK via the toolchain resolver.
-- **Docker** — for the local database, containerized builds, and Testcontainers-based tests.
-
-## Quick start
+## Local
 
 ```bash
-# Run the app — spring-boot-docker-compose starts PostgreSQL for you
-make run          # or: ./gradlew bootRun
-
-# Run against a throwaway Testcontainers DB (no docker-compose, no config)
-make dev          # or: ./gradlew bootTestRun
-
-# Run the full test suite
-make test         # or: ./gradlew test
+make run              # starts Postgres from compose.yml, runs the app on :8080
+make observability-up # Prometheus + Grafana (http://localhost:3000) + Alloy scraping the app
+make test             # unit tests, no Docker
+make itest            # integration tests, Testcontainers
+make help             # everything else
 ```
 
-Once running:
+`make run` uses the defaults in `.env.example`; create `.env` only to override them. Port 5432 taken?
+`DB_PORT=15433 make run`.
 
-- API base: <http://localhost:8080>
-- Swagger UI: <http://localhost:8080/swagger-ui.html>
-- Health: <http://localhost:8080/actuator/health>
+Endpoints: `/version`, `/actuator/health`, `/actuator/prometheus`, `/swagger-ui.html`.
 
-Run `make help` to see all available commands.
+## Zero to production
 
-## Configuration
+One VPS (Hetzner CX or CAX both work: images are amd64 + arm64), Docker installed, ports 80/443 open, a domain.
 
-Configuration lives in `src/main/resources/application.yml` and reads from environment variables with
-sensible local defaults:
+| Where | Set | Why |
+|---|---|---|
+| DNS | `A` record → VPS IP | Caddy obtains the Let's Encrypt certificate for it |
+| VPS `deploy/.env.prod` | `DOMAIN`, `ACME_EMAIL` (`POSTGRES_PASSWORD`, `APP_IMAGE`, `COMPOSE_PROJECT_NAME` are generated) | TLS, database, which image Watchtower follows |
+| VPS `deploy/.env.prod` (optional) | `COMPOSE_PROFILES=observability`, `GRAFANA_CLOUD_PROM_URL/USER/TOKEN` | Alloy pushes metrics to Grafana Cloud |
+| GitHub → Packages | GHCR package **public**, or `docker login ghcr.io` on the VPS and set `DOCKER_CONFIG_DIR` | Watchtower must be able to pull |
+| GitHub → Variables | `PRODUCTION_URL=https://your.domain` | CI waits for the VPS to serve the new revision and records a Deployment |
+| GitHub → Secrets (optional) | `GRAFANA_URL`, `GRAFANA_API_TOKEN` | CI pushes `deploy/grafana/**` to Grafana Cloud on merge |
+| GitHub → Secrets (optional) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Alert rules get pushed; weekly security failures notify you |
+| Grafana Cloud | stack → Prometheus → *Send metrics* (URL, instance id, token `metrics:write`); service account token `dashboards:write` | The two blocks above |
+| Local `.env` (optional) | `VPS_SSH=user@host`, `GRAFANA_URL`, `GRAFANA_API_TOKEN` | `make vps-*` and `make grafana-push-cloud` from your machine |
 
-| Variable      | Default                                    | Purpose            |
-|---------------|--------------------------------------------|--------------------|
-| `APP_NAME`    | `spring-template`                          | Application name   |
-| `SERVER_PORT` | `8080`                                     | HTTP port          |
-| `DB_URL`      | `jdbc:postgresql://localhost:5432/app`     | JDBC URL           |
-| `DB_USERNAME` | `app`                                      | DB user            |
-| `DB_PASSWORD` | `app`                                      | DB password        |
+On the VPS:
 
-The schema is owned by **Liquibase** (`src/main/resources/db/changelog`). Hibernate is set to `validate`
-only — add your changesets under `db/changelog/changes/`.
+```bash
+git clone https://github.com/<owner>/<repo>.git && cd <repo>
+make prod-init                 # writes deploy/.env.prod: generated DB password, image name from the git remote
+$EDITOR deploy/.env.prod       # DOMAIN, ACME_EMAIL, optional Grafana Cloud block
+make prod-up                   # validates the env, starts Caddy + 2 app replicas + Postgres + Watchtower + backup
+```
 
-### Profiles
+Then push to `main`. Nothing on the VPS is touched again.
 
-Base config is profile-agnostic; two overlays ship out of the box, selected via `SPRING_PROFILES_ACTIVE`:
-
-- **`dev`** (`application-dev.yml`) — verbose logging and easy SQL tracing for local work.
-- **`prod`** (`application-prod.yml`) — Hikari timeouts and leak detection, trimmed actuator exposure, `INFO`
-  logging. The Compose `app` service sets `SPRING_PROFILES_ACTIVE=prod`.
-
-### Caching & resilience
-
-`spring.cache` is backed by **Caffeine** (tune via `spring.cache.caffeine.spec`); annotate methods with
-`@Cacheable`. **Feign** clients are wrapped in a **Resilience4j** circuit breaker
-(`spring.cloud.openfeign.circuitbreaker.enabled`) — see `client/ExampleApiClient` and its fallback. Circuit-breaker
-and retry defaults live under `resilience4j.*` in `application.yml`.
-
-## Project layout
+## How a deploy works
 
 ```
-src/main/java/com/example/company
-├── Application.java          # entry point
-├── client/                   # Feign / HTTP clients
-├── config/                   # @Configuration, OpenAPI, global error handling, aspects
-├── controller/               # REST controllers
-├── dto/                      # request/response models
-├── entity/                   # JPA entities
-├── exception/                # ApplicationException + domain errors
-├── mapper/                   # MapStruct mappers
-├── model/                    # domain models
-├── repository/               # Spring Data repositories
-├── service/                  # business logic
-└── utils/                    # helpers
+git push main ─► ci: build+tests ‖ gitleaks+trivy+zizmor ─► image (amd64+arm64) ─► tag vX.Y.Z + Release
+                                                                     │
+                                          Watchtower polls GHCR ◄────┘   every 60 s
+                                                  │
+                     stop replica 1 (graceful) ─► start new ─► replica 2 ─► /version shows the new revision
 ```
+
+| Stage | Typical time |
+|---|---|
+| build + tests, security in parallel | 3 min |
+| multi-arch image from the prebuilt jar | 1 min |
+| Watchtower poll + rolling restart | 1–2 min |
+| push → live | **≈ 5–6 min** |
+
+Caddy re-resolves the `app` service name every 5 s and retries only connection-level failures, so a rolling restart
+is invisible to clients. Postgres and the management port are never reachable from the internet.
+
+Rollback on the VPS: `make prod-rollback TAG=1.4.1` (every GitHub Release lists its tag and this command).
+Details, first-time host setup, backups and the migration rule: [docs/deployment.md](docs/deployment.md).
+
+## Versioning
+
+Commit subjects follow Conventional Commits; `make setup` (run automatically by `make run`/`test`/`build`) installs a
+hook that rejects anything else, and CI checks again.
+
+| Subject | Release |
+|---|---|
+| `fix: …`, `perf: …`, `refactor|docs|test|build|ci|chore|style|revert: …` | patch |
+| `feat: …` | minor |
+| `feat!: …` or a `BREAKING CHANGE:` footer | major |
+
+`make release-name` prints the version the next push would produce. Image tags: `latest`, `X.Y.Z`, `X.Y`,
+`sha-<short>`. The Release notes list every commit since the previous tag.
+
+## Observability
+
+One dashboard, `deploy/grafana/dashboards/app-overview.json`, renders locally and in Grafana Cloud: running version
+and deploy markers (from `app_build_info`), HTTP rate/errors/latency, JVM, Hikari, log levels, circuit breakers.
+Edit it in the local Grafana, `make grafana-pull`, commit; CI pushes it to Grafana Cloud. Alerts (service down,
+5xx > 5 %, DB connections pending, heap > 90 %) are pushed only when the Telegram secrets exist.
+[docs/observability.md](docs/observability.md).
 
 ## Testing
 
-Integration tests extend `AbstractIntegrationTest`, which boots the full context against a real PostgreSQL
-started by Testcontainers (`TestcontainersConfiguration`) — no local database required. Docker must be
-running.
+- `src/test/java/**/unit/**` and everything outside `integration/`: no Docker, classes run concurrently.
+- `src/test/java/**/integration/**`: extend `AbstractIntegrationTest`; each Gradle fork boots its own context and
+  its own Postgres container, so forks never share a database.
+- Test data with Instancio (`support.Fixtures`); architecture rules in `ArchitectureTest`; `DashboardJsonTest` keeps
+  the Grafana JSON honest; `scripts/tests/*.test.sh` cover the bash tooling (`make test-scripts`).
 
-- **Test data** — build objects with **Instancio** via the `support.Fixtures` helper instead of hand-rolling
-  fixtures; `InstancioExampleTest` shows the pattern (full random objects, per-field overrides, reproducible seeds).
-- **Architecture** — `ArchitectureTest` (ArchUnit) enforces layering, naming, and no field injection. Rules
-  tolerate the empty scaffold (`archunit.properties`) and start biting as packages fill in.
-- **Coverage** — `./gradlew test` runs **JaCoCo**; the report lands in `build/reports/jacoco/`. Raise the
-  threshold in `jacocoTestCoverageVerification` (`build.gradle.kts`) as the codebase grows.
-
-## Containerize
-
-Build a single image:
+## Make it yours
 
 ```bash
-make image                       # docker build -t spring-template .
-docker run --rm -p 8080:8080 spring-template
+make rename PKG=com.acme.shop APP=shop   # moves the package, renames the app, one reviewable diff
+make build
 ```
 
-Or run the whole stack (app + PostgreSQL) with Compose:
+Then add the first Liquibase changeset under `src/main/resources/db/changelog/changes/` and go.
 
-```bash
-cp .env.example .env             # tweak values as needed
-make up                          # docker compose --env-file .env.example --profile full up --build -d
-make down                        # stop it
-```
+## Docs
 
-`make up` uses `.env` when present and falls back to `.env.example`. The `app` service sits behind the
-Compose `full` profile, so `./gradlew bootRun` still starts only the `db`.
+| | |
+|---|---|
+| [docs/deployment.md](docs/deployment.md) | host setup, rollback, backups/restore, migration rule, memory budget, reading a failed deploy |
+| [docs/observability.md](docs/observability.md) | metrics path, dashboard loop, alerts, adding a metric |
+| [CLAUDE.md](CLAUDE.md) | what Claude needs to know to work in this repo |
+| `docs/superpowers/specs/` | design records |
 
-The multi-stage `Dockerfile` produces a layered, non-root image on a slim JRE.
-
-## CI & dependency updates
-
-- **GitHub Actions** (`.github/workflows/ci.yml`) checks formatting, runs `./gradlew build` on every push and
-  PR, and uploads the test and coverage reports.
-- **Renovate** (`renovate.json`) opens grouped dependency-update PRs and auto-merges safe minor/patch bumps.
-
-## Making it yours
-
-1. Rename the base package `com.example.company` and update `group` in `build.gradle.kts`.
-2. Set `rootProject.name` in `settings.gradle.kts` and `APP_NAME`.
-3. Add your first Liquibase changeset and JPA entities.
-
-## License
-
-[MIT](LICENSE)
+MIT — see [LICENSE](LICENSE).
