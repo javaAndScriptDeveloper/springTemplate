@@ -32,6 +32,18 @@ grep -q 'unhealthy_status' "$root/deploy/Caddyfile" && fail "Caddyfile ejects re
 docker run --rm -v "$root/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=example.com -e ACME_EMAIL=ops@example.com \
   caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || fail "Caddyfile does not validate"
 
-bash -n "$root/deploy/backup/backup.sh" || fail "backup.sh has a syntax error"
+# Backups are opt-in: absent without the profile, valid with it.
+grep -qE '^  backup:' <<<"$rendered" && fail "backup service must only exist with the backup profile"
+rendered_backup="$(docker compose -f "$root/deploy/compose.prod.yml" --env-file "$here/fixtures/env.prod.test" --profile backup config)" \
+  || fail "deploy/compose.prod.yml does not validate with the backup profile"
+grep -q 'RCLONE_CONFIG: /config/rclone.conf' <<<"$rendered_backup" || fail "backup does not point rclone at the mounted config"
+# A missing rclone.conf must fail loudly, not become a directory the later scp lands inside.
+grep -q 'create_host_path: false' <<<"$rendered_backup" || fail "rclone.conf mount would be auto-created as a directory"
+grep -q 'target: /var/lock/backup' <<<"$rendered_backup" || fail "backup lock is not on a shared volume"
+grep -q 'target: /metrics$' <<<"$rendered_backup" || fail "backup metrics volume missing"
+git -C "$root" check-ignore -q deploy/backup/rclone.conf || fail "deploy/backup/rclone.conf is not gitignored"
+
+sh -n "$root/deploy/backup/backup.sh" || fail "backup.sh has a syntax error"
+if command -v shellcheck >/dev/null; then shellcheck -s sh "$root/deploy/backup/backup.sh" || fail "shellcheck backup.sh"; fi
 
 echo "deploy-config: all passed"

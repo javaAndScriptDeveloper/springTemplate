@@ -151,6 +151,9 @@ services:
       com.centurylinklabs.watchtower.enable: "false"
 
   backup:
+    # Enabled by COMPOSE_PROFILES=backup in deploy/.env.prod; uploads pg_dump to an rclone remote (docs/deployment.md
+    # §6). No :? guards on the backup variables: compose interpolates profiled services even when the profile is off.
+    profiles: ["backup"]
     build: ./backup
     image: ${COMPOSE_PROJECT_NAME}-backup:local
     # Built on the host, never pulled: Watchtower must not look for it in a registry.
@@ -163,10 +166,23 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-app}
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make prod-init (generates POSTGRES_PASSWORD)}
-      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+      RCLONE_REMOTE: ${RCLONE_REMOTE:-}
+      RCLONE_CONFIG: /config/rclone.conf
+      BACKUP_CRON: ${BACKUP_CRON:-0 */6 * * *}
+      TZ: ${BACKUP_TZ:-UTC}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
+      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-12}
     volumes:
-      - ${BACKUP_DIR:-./backups}:/backups
+      # Read-write: rclone stores refreshed OAuth tokens (Google Drive) back into this file. Must exist on the host.
+      - type: bind
+        source: ${RCLONE_CONFIG_FILE:-./backup/rclone.conf}
+        target: /config/rclone.conf
+        bind:
+          create_host_path: false
+      # Shared by the scheduler and every `docker compose run --rm backup …`, so they cannot overlap.
+      - backup_lock:/var/lock/backup
+      # Read by Alloy (textfile collector) for the BackupStale alert.
+      - backup_metrics:/metrics
     networks: [data]
     mem_limit: 64m
     logging: *default-logging
@@ -211,3 +227,5 @@ volumes:
   caddy_data:
   caddy_config:
   alloy_data:
+  backup_lock:
+  backup_metrics:
