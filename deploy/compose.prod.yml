@@ -76,6 +76,11 @@ services:
     logging: *default-logging
     labels:
       com.centurylinklabs.watchtower.enable: "true"
+      # Executed by Watchtower inside the NEW replica after start; returns only once actuator reports UP, so the
+      # second replica is stopped only when the first is serving. Timeout in minutes.
+      com.centurylinklabs.watchtower.lifecycle.post-update: >-
+        sh -c 'for i in $(seq 1 90); do curl -sf http://127.0.0.1:8081/actuator/health | grep -q "\"status\":\"UP\"" && exit 0; sleep 2; done; echo "replica not healthy after 180s" >&2; exit 1'
+      com.centurylinklabs.watchtower.lifecycle.post-update-timeout: "4"
 
   db:
     image: postgres:17-alpine
@@ -130,11 +135,15 @@ services:
       WATCHTOWER_INCLUDE_STOPPED: "false"
       # Longer than the app's stop_grace_period, so a draining replica is not killed early.
       WATCHTOWER_TIMEOUT: 60s
+      # Run the app's post-update hook (below) inside each new replica and wait for it before touching the next one.
+      # Without this, rolling restart is stop→start→next and both replicas are down for one JVM boot.
+      WATCHTOWER_LIFECYCLE_HOOKS: "true"
       WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-60}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      # Only read when the GHCR package is private (after `docker login ghcr.io` on the host).
-      - ${DOCKER_CONFIG_DIR:-/dev/null}:/config.json:ro
+      # Registry credentials, only for a private GHCR package: the config.json written by `docker login ghcr.io`.
+      # Must be the file itself; a directory here leaves Watchtower without credentials.
+      - ${DOCKER_CONFIG_FILE:-/dev/null}:/config.json:ro
     networks: [edge]
     mem_limit: 48m
     logging: *default-logging

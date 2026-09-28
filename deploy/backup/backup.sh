@@ -5,7 +5,7 @@
 #   backup.sh once     one dump, then exit (make prod-backup-now)
 #
 # Restore (from the repository root on the VPS):
-#   make prod-restore FILE=backups/20260928T020000Z.dump
+#   make prod-restore FILE=deploy/backups/20260928T020000Z.dump
 set -eu
 
 BACKUP_ROOT=/backups

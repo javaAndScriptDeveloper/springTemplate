@@ -7,22 +7,34 @@ import java.util.regex.Pattern;
  * Masks credentials before they reach a log line. Applied to Feign request/response logging and to the inbound
  * request/response filter, so DEBUG logging can stay on without leaking tokens.
  *
- * <p>Rules are deliberately broad ({@code token}, {@code secret}, {@code key} in any field name): a false positive
- * hides a harmless value, a false negative ships a credential to the log store.
+ * <p>Rules are deliberately broad: any field or header whose name <em>contains</em> a sensitive word is masked
+ * whole, whatever the auth scheme or casing. A false positive hides a harmless value; a false negative ships a
+ * credential to the log store.
  */
 public final class SecretRedactor {
 
     private static final String MASK = "****";
-    private static final String SENSITIVE_NAMES =
-            "password|passwd|secret|token|access_token|refresh_token|id_token|client_secret|api[_-]?key|apikey|code";
+
+    /** Matched as a substring of the field/header name, case-insensitively. */
+    private static final String SENSITIVE_WORDS =
+            "password|passwd|secret|token|api[-_]?key|apikey|authorization|cookie|credential|private[-_]?key";
+
+    private static final String SENSITIVE_NAME = "[\\w-]*(?:" + SENSITIVE_WORDS + ")[\\w-]*";
+    /** A JSON string body including escaped characters, so a value with an escaped quote is masked whole. */
+    private static final String JSON_STRING = "(?:\\\\.|[^\"\\\\])*";
 
     private static final List<Rule> RULES = List.of(
-            // Authorization: Bearer xxx / Basic xxx
-            new Rule(Pattern.compile("(?i)(authorization:\\s*(?:bearer|basic)\\s+)\\S+"), "$1" + MASK),
-            // "password": "xxx"  (JSON, any spacing)
-            new Rule(Pattern.compile("(?i)(\"(?:" + SENSITIVE_NAMES + ")\"\\s*:\\s*\")[^\"]*(\")"), "$1" + MASK + "$2"),
-            // password=xxx (form bodies, query strings)
-            new Rule(Pattern.compile("(?i)\\b((?:" + SENSITIVE_NAMES + ")=)[^&\\s]+"), "$1" + MASK));
+            // Header lines: Authorization: <anything>, X-Api-Key: …, Cookie: …, Set-Cookie: …
+            new Rule(Pattern.compile("(?im)^(\\s*" + SENSITIVE_NAME + "\\s*:\\s*)\\S.*$"), "$1" + MASK),
+            // JSON fields: "password": "…", "accessToken":"…", "Authorization": "Bearer …"
+            new Rule(
+                    Pattern.compile("(?i)(\"" + SENSITIVE_NAME + "\"\\s*:\\s*\")" + JSON_STRING + "(\")"),
+                    "$1" + MASK + "$2"),
+            // Form bodies and query strings: password=…, accessToken=…, client_secret=…
+            new Rule(Pattern.compile("(?i)(?<![\\w-])(" + SENSITIVE_NAME + "=)[^&\\s]+"), "$1" + MASK),
+            // Bare OAuth codes (short-lived, but they mint tokens)
+            new Rule(Pattern.compile("(?i)(\"code\"\\s*:\\s*\")" + JSON_STRING + "(\")"), "$1" + MASK + "$2"),
+            new Rule(Pattern.compile("(?i)(?<![\\w-])(code=)[^&\\s]+"), "$1" + MASK));
 
     private SecretRedactor() {}
 

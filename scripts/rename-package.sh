@@ -35,8 +35,10 @@ for src in src/main/java src/test/java; do
   d="$src/$old_dir"; while [[ "$d" != "$src" ]] && rmdir "$d" 2>/dev/null; do d="$(dirname "$d")"; done
 done
 
-# Package references: dotted (Java, YAML, Gradle strings) and slashed (JaCoCo exclusions).
-grep -rl --exclude-dir=.git --exclude-dir=build --exclude-dir=.gradle --exclude="$(basename "$0")" -e "$old_pkg" -e "$old_dir" . \
+# Package references: dotted (Java, YAML, Gradle strings) and slashed (JaCoCo exclusions). The script's own tests
+# and the historical design docs keep the template's name on purpose.
+{ grep -rl --exclude-dir=.git --exclude-dir=build --exclude-dir=.gradle --exclude-dir=superpowers \
+    --exclude-dir=tests --exclude="$(basename "$0")" -e "$old_pkg" -e "$old_dir" . || true; } \
   | xargs -r sed -i -e "s#${old_pkg_re}#${new_pkg}#g" -e "s#${old_dir}#${new_dir}#g"
 
 # Application name: Gradle project, env defaults, docs.

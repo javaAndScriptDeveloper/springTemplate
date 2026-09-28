@@ -95,7 +95,7 @@ vps-status: ## Image tag per replica and what /version answers
 	scripts/vps.sh deploy-status
 
 vps-psql: ## psql into the production database through an SSH tunnel (SQL="select 1" for one statement)
-	scripts/vps.sh psql $(SQL)
+	scripts/vps.sh psql $(if $(SQL),"$(SQL)")
 
 vps-datagrip: ## Open the DB tunnel and print a JDBC URL to paste into DataGrip
 	scripts/vps.sh datagrip
@@ -129,8 +129,8 @@ prod-pull: ## Pull the current APP_IMAGE_TAG now instead of waiting for Watchtow
 prod-backup-now: ## Run one pg_dump immediately (see deploy/backup)
 	$(PROD) run --rm backup once
 
-prod-restore: ## Restore a dump: make prod-restore FILE=backups/<stamp>.dump  (stops app replicas first)
-	@test -n "$(FILE)" || (echo "usage: make prod-restore FILE=backups/<stamp>.dump" && exit 1)
+prod-restore: ## Restore a dump: make prod-restore FILE=deploy/backups/<stamp>.dump  (stops app replicas first)
+	@test -n "$(FILE)" || (echo "usage: make prod-restore FILE=deploy/backups/<stamp>.dump" && exit 1)
 	$(PROD) stop app
 	$(PROD) exec -T db sh -c 'pg_restore --clean --if-exists --no-owner -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < $(FILE)
 	$(PROD) start app

@@ -45,4 +45,13 @@ git -C "$repo" commit -q --allow-empty -m "bad subject"
 if out="$("$script" -C "$repo" v0.1.0..HEAD 2>&1)"; then fail "range with bad commit accepted"; fi
 [[ "$out" == *"bad subject"* ]] || fail "offending subject not reported: $out"
 
+# --push-range BEFORE AFTER: lints only the pushed commits; the all-zero BEFORE (new branch / first push) means "HEAD
+# only", never the whole history — a template's inherited "Initial commit" must not deadlock releases.
+git -C "$repo" commit -q --allow-empty -m "fix: newest"
+zero="0000000000000000000000000000000000000000"
+"$script" -C "$repo" --push-range "$zero" HEAD >/dev/null || fail "zero BEFORE should lint HEAD only (which is good)"
+first="$(git -C "$repo" rev-list --max-parents=0 HEAD)"
+if "$script" -C "$repo" --push-range "$first" HEAD >/dev/null 2>&1; then fail "push range containing 'bad subject' accepted"; fi
+"$script" -C "$repo" --push-range HEAD~1 HEAD >/dev/null || fail "push range with one good commit rejected"
+
 echo "lint-commits: all passed"

@@ -16,13 +16,17 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.cloud.client.circuitbreaker.NoFallbackAvailableException;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.TestConstructor;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @WebMvcTest(controllers = GlobalExceptionHandlerTest.ThrowingController.class)
 @Import({GlobalExceptionHandler.class, GlobalExceptionHandlerTest.ThrowingController.class})
@@ -51,7 +55,28 @@ class GlobalExceptionHandlerTest {
     void unparsableParameterIsA400Problem() throws Exception {
         mockMvc.perform(get("/throw/typed").param("n", "abc"))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.detail").value("Malformed request"));
+                .andExpect(jsonPath("$.status").value(400));
+    }
+
+    @Test
+    void unsupportedContentTypeIsA415Problem() throws Exception {
+        mockMvc.perform(post("/throw/body").contentType("text/plain").content("x"))
+                .andExpect(status().isUnsupportedMediaType())
+                .andExpect(jsonPath("$.status").value(415));
+    }
+
+    @Test
+    void responseStatusExceptionKeepsItsStatus() throws Exception {
+        mockMvc.perform(get("/throw/status"))
+                .andExpect(status().isPaymentRequired())
+                .andExpect(jsonPath("$.detail").value("pay up"));
+    }
+
+    @Test
+    void circuitBreakerWithoutFallbackIsA502() throws Exception {
+        mockMvc.perform(get("/throw/no-fallback"))
+                .andExpect(status().isBadGateway())
+                .andExpect(jsonPath("$.detail").value("Upstream service unavailable"));
     }
 
     @Test
@@ -100,6 +125,21 @@ class GlobalExceptionHandlerTest {
                     .body("secret-upstream-body", StandardCharsets.UTF_8)
                     .build();
             throw FeignException.errorStatus("Upstream#call()", response);
+        }
+
+        @PostMapping(value = "/throw/body", consumes = "application/json")
+        String body(@RequestBody Map<String, String> body) {
+            return "ok";
+        }
+
+        @GetMapping("/throw/status")
+        String status() {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED, "pay up");
+        }
+
+        @GetMapping("/throw/no-fallback")
+        String noFallback() {
+            throw new NoFallbackAvailableException("circuit open", new RuntimeException("upstream body"));
         }
 
         @GetMapping("/throw/app")

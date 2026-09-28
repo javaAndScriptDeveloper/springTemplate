@@ -40,7 +40,7 @@ One VPS (Hetzner CX or CAX both work: images are amd64 + arm64), Docker installe
 | DNS | `A` record → VPS IP | Caddy obtains the Let's Encrypt certificate for it |
 | VPS `deploy/.env.prod` | `DOMAIN`, `ACME_EMAIL` (`POSTGRES_PASSWORD`, `APP_IMAGE`, `COMPOSE_PROJECT_NAME` are generated) | TLS, database, which image Watchtower follows |
 | VPS `deploy/.env.prod` (optional) | `COMPOSE_PROFILES=observability`, `GRAFANA_CLOUD_PROM_URL/USER/TOKEN` | Alloy pushes metrics to Grafana Cloud |
-| GitHub → Packages | GHCR package **public**, or `docker login ghcr.io` on the VPS and set `DOCKER_CONFIG_DIR` | Watchtower must be able to pull |
+| GitHub → Packages | GHCR package **public**, or `docker login ghcr.io` on the VPS and set `DOCKER_CONFIG_FILE` | Watchtower must be able to pull |
 | GitHub → Variables | `PRODUCTION_URL=https://your.domain` | CI waits for the VPS to serve the new revision and records a Deployment |
 | GitHub → Secrets (optional) | `GRAFANA_URL`, `GRAFANA_API_TOKEN` | CI pushes `deploy/grafana/**` to Grafana Cloud on merge |
 | GitHub → Secrets (optional) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Alert rules get pushed; weekly security failures notify you |
@@ -75,8 +75,8 @@ git push main ─► ci: build+tests ‖ gitleaks+trivy+zizmor ─► image (amd
 | Watchtower poll + rolling restart | 1–2 min |
 | push → live | **≈ 5–6 min** |
 
-Caddy re-resolves the `app` service name every 5 s and retries only connection-level failures, so a rolling restart
-is invisible to clients. Postgres and the management port are never reachable from the internet.
+Watchtower waits for each new replica's health check before stopping the next one, and Caddy re-resolves the `app`
+service name every 5 s and retries only connection-level failures, so a rolling restart is invisible to clients. Postgres and the management port are never reachable from the internet.
 
 Rollback on the VPS: `make prod-rollback TAG=1.4.1` (every GitHub Release lists its tag and this command).
 Details, first-time host setup, backups and the migration rule: [docs/deployment.md](docs/deployment.md).

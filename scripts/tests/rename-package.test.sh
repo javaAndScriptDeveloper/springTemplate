@@ -9,6 +9,7 @@ tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 git -C "$root" archive HEAD | tar -x -C "$tmp"
 # Working-tree versions of the script under test and its inputs, so an uncommitted fix is what gets tested.
 cp "$root/scripts/rename-package.sh" "$tmp/scripts/"
+cp "$root/scripts/tests/rename-package.test.sh" "$tmp/scripts/tests/"
 git -C "$tmp" init -q -b main; git -C "$tmp" -c user.email=t@t -c user.name=t add -A >/dev/null
 git -C "$tmp" -c user.email=t@t -c user.name=t commit -q -m "chore: snapshot"
 
@@ -30,5 +31,13 @@ grep -q 'rootProject.name = "shop"' "$tmp/settings.gradle.kts" || fail "rootProj
 grep -q '^APP_NAME=shop$' "$tmp/.env.example" || fail "APP_NAME not set in .env.example"
 grep -q 'group = "com.acme.shop"' "$tmp/build.gradle.kts" || fail "gradle group not set"
 grep -q 'com/acme/shop/Application.class' "$tmp/build.gradle.kts" || fail "coverage exclusions not rewritten"
+
+# The script's own tests and the historical design docs keep the old name; rewriting them breaks CI after a rename.
+untouched="$(git -C "$tmp" status --porcelain -- scripts/tests docs/superpowers)"
+[[ -z "$untouched" ]] || fail "rename rewrote files that must keep the template name: $untouched"
+# And it must exit 0 when run on a tree where nothing matches any more (idempotent, no pipefail death).
+git -C "$tmp" -c user.email=t@t -c user.name=t add -A >/dev/null
+git -C "$tmp" -c user.email=t@t -c user.name=t commit -q -m "chore: rename"
+(cd "$tmp" && scripts/rename-package.sh com.acme.shop shop >/dev/null) || fail "second run did not exit 0"
 
 echo "rename-package: all passed"

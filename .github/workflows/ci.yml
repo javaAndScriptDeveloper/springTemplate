@@ -50,17 +50,17 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
       - name: Lint commit subjects
+        # Pull requests: every commit the PR adds. Pushes: only the commits of this push, so history inherited from
+        # the template (GitHub's "Initial commit") can never block a release.
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
         run: |
           if [ -n "$BASE_SHA" ]; then
-            range="${BASE_SHA}..HEAD"
+            scripts/lint-commits.sh "${BASE_SHA}..HEAD"
           else
-            last_tag="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
-            range="${last_tag:+${last_tag}..}HEAD"
+            scripts/lint-commits.sh --push-range "${BEFORE}" "${GITHUB_SHA}"
           fi
-          echo "checking ${range}"
-          scripts/lint-commits.sh "${range}"
 
       - name: Script tests
         run: scripts/tests/run.sh
@@ -114,7 +114,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: zizmor (workflow misconfiguration)
-        run: uvx zizmor --min-severity medium .github/workflows
+        run: uvx zizmor@1.30.1 --min-severity medium .github/workflows
 
   image:
     name: Build image
@@ -221,7 +221,8 @@ jobs:
       - name: Previous release tag
         id: prev
         run: |
-          prev="$(git tag -l 'v[0-9]*' --sort=-v:refname | sed -n '2p')"
+          # Image tags carry no "v": what the release notes print is what APP_IMAGE_TAG takes.
+          prev="$(git tag -l 'v[0-9]*' --sort=-v:refname | sed -n '2p' | sed 's/^v//')"
           echo "tag=${prev}" >> "$GITHUB_OUTPUT"
 
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
@@ -239,7 +240,7 @@ jobs:
             ```bash
             make prod-rollback TAG=${{ steps.prev.outputs.tag != '' && steps.prev.outputs.tag || 'sha-xxxxxxx' }}
             ```
-            (strip the leading `v`; see docs/deployment.md for when a schema change makes this unsafe)
+            See docs/deployment.md §5 for when a schema change makes a rollback unsafe.
 
   # Publication is not deployment. The host pulls on its own schedule, and a stalled Watchtower is the known failure
   # mode of that design, so the GitHub Deployment is resolved only by observing the host serving the new revision.

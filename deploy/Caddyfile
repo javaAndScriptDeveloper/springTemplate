@@ -29,10 +29,10 @@
 		}
 
 		# Dynamic upstreams cannot use active health checks, so health is passive: a replica that refuses a connection
-		# is taken out of rotation for fail_duration.
+		# is taken out of rotation for fail_duration. Deliberately NOT on 5xx responses: one buggy endpoint must not
+		# eject a replica that serves every other route fine.
 		fail_duration 10s
 		max_fails 1
-		unhealthy_status 5xx
 
 		# Retry only on connection-level failure: the request never reached the application, so re-sending it cannot
 		# double-apply anything. A request that was accepted and then errored is returned to the client untouched.

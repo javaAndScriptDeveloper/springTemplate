@@ -24,8 +24,8 @@ make prod-ps
 ```
 
 If the GHCR package is private: `docker login ghcr.io` with a PAT (`read:packages`), then set
-`DOCKER_CONFIG_DIR=/home/<user>/.docker` in `deploy/.env.prod` so Watchtower can pull too. Public packages need
-nothing.
+`DOCKER_CONFIG_FILE=/home/<user>/.docker/config.json` in `deploy/.env.prod` so Watchtower can pull too. Public
+packages need nothing.
 
 ## 3. What healthy looks like
 
@@ -44,8 +44,10 @@ From your machine: `make vps-status`, `make vps-logs SERVICE=app` (needs `VPS_SS
 2. Watchtower (`WATCHTOWER_POLL_INTERVAL`, 60 s) sees it and, because `WATCHTOWER_ROLLING_RESTART=true`, stops one
    `app` replica. Spring's graceful shutdown drains in-flight requests (up to 30 s); `stop_grace_period` is 45 s.
 3. Caddy's passive health check drops the refused replica within one failed dial; new connections go to the other.
-4. The new container starts, runs Liquibase, passes its healthcheck; Caddy's DNS refresh (5 s) adds it.
-5. Repeat for replica 2. CI's `deploy` job samples `/version` four times per round and marks the GitHub Deployment
+4. The new container starts and runs Liquibase. Watchtower then runs the replica's `post-update` lifecycle hook,
+   which polls `/actuator/health` until it reports `UP` (up to 3 min); Caddy's DNS refresh (5 s) adds the replica.
+5. Only now does Watchtower repeat the cycle for replica 2. Without the hook (`WATCHTOWER_LIFECYCLE_HOOKS`), rolling
+   restart is stop→start→next and both replicas are down for one JVM boot. CI's `deploy` job samples `/version` four times per round and marks the GitHub Deployment
    successful once every answer carries the new revision (15 min timeout).
 
 A red `deploy` job means "published but not picked up": check Watchtower logs first. The one silent killer is
@@ -81,13 +83,14 @@ Liquibase's `DATABASECHANGELOGLOCK` serialises the two replicas at boot, so a mi
 
 ## 6. Backups and restore
 
-The `backup` service runs `pg_dump -Fc` every `BACKUP_INTERVAL_SECONDS` (daily) into `BACKUP_DIR` (`./backups`) and
+The `backup` service runs `pg_dump -Fc` every `BACKUP_INTERVAL_SECONDS` (daily) into `BACKUP_DIR` (`./backups`,
+relative to `deploy/`, so `deploy/backups/` on the host) and
 prunes dumps older than `BACKUP_RETENTION_DAYS` (14) **only after a successful dump**. Copy the directory off the host
 (cron + `rsync`, or object storage) — a backup on the same disk as the database is a convenience, not a backup.
 
 ```bash
 make prod-backup-now                                  # one dump right now
-make prod-restore FILE=backups/20260928T020000Z.dump  # stops app, pg_restore --clean, starts app
+make prod-restore FILE=deploy/backups/20260928T020000Z.dump  # stops app, pg_restore --clean, starts app
 ```
 
 ## 7. Memory budget
@@ -112,7 +115,7 @@ Re-do this sum when adding a service or raising a limit.
 | Pull now instead of waiting for Watchtower | `make prod-pull` |
 | Stop everything (volumes kept) | `make prod-down` |
 | Database shell | from your machine: `make vps-psql`; on the VPS: `docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod exec db psql -U app app` |
-| Rotate the DB password | `make prod-init --force` is **not** enough: change it in Postgres (`ALTER USER`), then in `.env.prod`, then `make prod-up` |
+| Rotate the DB password | `scripts/init-prod-env.sh --force` is **not** enough: change it in Postgres (`ALTER USER`), then in `.env.prod`, then `make prod-up` |
 | Change replicas / memory | edit `APP_REPLICAS` / `APP_MEM_LIMIT` in `.env.prod`, `make prod-up` |
 
 ## 9. Accepted exposure

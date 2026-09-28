@@ -18,6 +18,17 @@ if docker compose -f "$root/deploy/compose.prod.yml" --env-file /dev/null config
   fail "compose.prod.yml validated with no environment; a required variable lost its :? guard"
 fi
 
+rendered="$(docker compose -f "$root/deploy/compose.prod.yml" --env-file "$here/fixtures/env.prod.test" config)"
+# Private-registry credentials: the mount must be a FILE ending in config.json, or Watchtower sees a directory.
+rendered_cfg="$(DOCKER_CONFIG_FILE=/home/u/.docker/config.json docker compose -f "$root/deploy/compose.prod.yml" --env-file "$here/fixtures/env.prod.test" config)"
+grep -q 'source: /home/u/.docker/config.json' <<<"$rendered_cfg" || fail "DOCKER_CONFIG_FILE is not mounted as the file /config.json"
+grep -q 'source: /dev/null' <<<"$rendered" || fail "default registry credential mount should be /dev/null"
+# Rolling restart must wait for the new replica to be healthy before the next one is stopped.
+grep -q 'WATCHTOWER_LIFECYCLE_HOOKS: "true"' <<<"$rendered" || fail "Watchtower lifecycle hooks not enabled"
+grep -q 'com.centurylinklabs.watchtower.lifecycle.post-update:' <<<"$rendered" || fail "app has no post-update health wait hook"
+# A single 5xx must not eject a replica from Caddy's rotation.
+grep -q 'unhealthy_status' "$root/deploy/Caddyfile" && fail "Caddyfile ejects replicas on 5xx responses"
+
 docker run --rm -v "$root/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=example.com -e ACME_EMAIL=ops@example.com \
   caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || fail "Caddyfile does not validate"
 

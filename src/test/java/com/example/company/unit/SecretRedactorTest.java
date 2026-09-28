@@ -9,8 +9,8 @@ class SecretRedactorTest {
 
     @Test
     void masksBearerAndBasicAuthorizationHeaders() {
-        assertThat(SecretRedactor.redact("Authorization: Bearer abc.def-ghi")).isEqualTo("Authorization: Bearer ****");
-        assertThat(SecretRedactor.redact("authorization: basic dXNlcjpwYXNz")).isEqualTo("authorization: basic ****");
+        assertThat(SecretRedactor.redact("Authorization: Bearer abc.def-ghi")).isEqualTo("Authorization: ****");
+        assertThat(SecretRedactor.redact("authorization: basic dXNlcjpwYXNz")).isEqualTo("authorization: ****");
     }
 
     @Test
@@ -25,6 +25,32 @@ class SecretRedactorTest {
     void masksSensitiveFormAndQueryParameters() {
         assertThat(SecretRedactor.redact("client_secret=abc&code=1234&state=xyz"))
                 .isEqualTo("client_secret=****&code=****&state=xyz");
+    }
+
+    @Test
+    void masksAnyFieldWhoseNameContainsASensitiveWord() {
+        var json =
+                "{\"accessToken\":\"a\",\"clientSecret\":\"b\",\"Authorization\": \"Bearer c\",\"userName\":\"ada\"}";
+
+        assertThat(SecretRedactor.redact(json))
+                .isEqualTo(
+                        "{\"accessToken\":\"****\",\"clientSecret\":\"****\",\"Authorization\": \"****\",\"userName\":\"ada\"}");
+        assertThat(SecretRedactor.redact("accessToken=abc&refresh_token=def&name=x"))
+                .isEqualTo("accessToken=****&refresh_token=****&name=x");
+    }
+
+    @Test
+    void masksSensitiveHeadersWhateverTheScheme() {
+        assertThat(SecretRedactor.redact("Authorization: Token abc")).isEqualTo("Authorization: ****");
+        assertThat(SecretRedactor.redact("X-Api-Key: abc-123")).isEqualTo("X-Api-Key: ****");
+        assertThat(SecretRedactor.redact("Cookie: session=abc; theme=dark")).isEqualTo("Cookie: ****");
+        assertThat(SecretRedactor.redact("Set-Cookie: sid=1; Path=/")).isEqualTo("Set-Cookie: ****");
+    }
+
+    @Test
+    void masksJsonValuesContainingEscapedQuotes() {
+        assertThat(SecretRedactor.redact("{\"password\": \"a\\\"b\", \"x\": 1}"))
+                .isEqualTo("{\"password\": \"****\", \"x\": 1}");
     }
 
     @Test
