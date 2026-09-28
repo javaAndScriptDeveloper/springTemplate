@@ -46,13 +46,27 @@ cat > "$tmp/bin/pg_restore" <<'FAKE'
 file="${*: -1}"
 echo "pg_restore $* <= $(cat "$file")" >> "$CALL_LOG"
 [[ "${FAKE_PG_RESTORE_FAIL:-}" != 1 ]] || exit 1
-for a in "$@"; do case "$a" in --file=*) cat "$file" > "${a#--file=}" ;; esac; done
+for a in "$@"; do
+  case "$a" in
+    --file=-) cat "$file" ;;
+    --file=*) cat "$file" > "${a#--file=}" ;;
+  esac
+done
 FAKE
-# psql: logs its arguments and, on one following line each, what it read on stdin.
+# psql: logs its arguments and, on one following line each, the SQL it got (from -f FILE, else stdin).
 cat > "$tmp/bin/psql" <<'FAKE'
 #!/usr/bin/env bash
-{ echo "psql $*"; sed 's/^/  stdin: /'; } >> "$CALL_LOG"
+args="$*"; src=/dev/stdin
+while (($#)); do [[ "$1" == -f ]] && src="$2"; shift; done
+{ echo "psql $args"; sed 's/^/  stdin: /' "$src"; } >> "$CALL_LOG"
 [[ "${FAKE_PSQL_FAIL:-}" != 1 ]] || exit 1
+FAKE
+# cat: the real one, except that it fails on the converted .sql file when FAKE_CAT_SQL_FAIL=1 (a read error between
+# converting the dump and applying it).
+cat > "$tmp/bin/cat" <<'FAKE'
+#!/usr/bin/env bash
+if [[ "${FAKE_CAT_SQL_FAIL:-}" == 1 ]]; then for a in "$@"; do [[ "$a" == *.sql ]] && exit 1; done; fi
+exec /bin/cat "$@"
 FAKE
 cat > "$tmp/bin/pg_isready" <<'FAKE'
 #!/usr/bin/env bash
@@ -221,6 +235,14 @@ compgen -G "$tmp/work/*" >/dev/null && fail "restore left files in the temp dir:
 RESTORE_CONFIRM=yes sh "$script" restore 29990101T000000Z >/dev/null || fail "restore <stamp> failed: $(cat "$CALL_LOG")"
 grep -qx '  stdin: dump-of-half-run' "$CALL_LOG" || fail "explicit stamp did not restore its dump: $(cat "$CALL_LOG")"
 compgen -G "$tmp/work/*" >/dev/null && fail "restore <stamp> left files in the temp dir: $(ls "$tmp/work")"
+
+# restore: a read error after the conversion must never hand psql the schema drop without the dump (that would
+# commit an empty schema and report success).
+: > "$CALL_LOG"
+FAKE_CAT_SQL_FAIL=1 RESTORE_CONFIRM=yes sh "$script" restore "$good" >/dev/null 2>&1 || true
+if grep -qx '  stdin: DROP SCHEMA public CASCADE; CREATE SCHEMA public;' "$CALL_LOG"; then
+  grep -qx '  stdin: dump-of-db' "$CALL_LOG" || fail "psql got DROP SCHEMA without the dump: $(cat "$CALL_LOG")"
+fi
 
 # restore: a failing psql (rolled-back transaction) or a failing conversion → non-zero exit.
 if FAKE_PSQL_FAIL=1 RESTORE_CONFIRM=yes sh "$script" restore "$good" >/dev/null 2>&1; then

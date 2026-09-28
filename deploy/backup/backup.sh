@@ -202,14 +202,16 @@ restore() {
 	# shellcheck disable=SC2086
 	rclone copyto ${RCLONE_FLAGS} "${REMOTE}/postgres/${want}.dump" "${restore_dump}" \
 		|| die "download of postgres/${want}.dump failed; database unchanged"
-	# To SQL first, without a connection (not via pg: --dbname would make pg_restore restore into the database).
-	pg_restore --no-owner --file="${restore_sql}" "${restore_dump}" \
-		|| die "could not read postgres/${want}.dump; database unchanged"
 	# `pg_restore --clean` drops only what the dump contains: a table created after the dump would survive (and block
 	# the drop of anything it references). So the whole public schema is replaced, in one transaction: a failed
-	# restore leaves the database exactly as it was.
-	{ echo 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'; cat "${restore_sql}"; } \
-		| pg psql --quiet -v ON_ERROR_STOP=1 --single-transaction >/dev/null \
+	# restore leaves the database exactly as it was. The SQL is built as one file and handed to psql with -f, never
+	# piped: sh has no pipefail, so a failed producer in a pipe would let psql commit the drop alone.
+	echo 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' > "${restore_sql}" \
+		|| die "could not write ${restore_sql}; database unchanged"
+	# Converted without a connection (not via pg: --dbname would make pg_restore restore into the database).
+	pg_restore --no-owner --file=- "${restore_dump}" >> "${restore_sql}" \
+		|| die "could not read postgres/${want}.dump; database unchanged"
+	pg psql --quiet -v ON_ERROR_STOP=1 --single-transaction -f "${restore_sql}" >/dev/null \
 		|| die "restore failed; database unchanged (transaction rolled back)"
 	log "database restored from postgres/${want}.dump"
 }
