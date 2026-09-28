@@ -47,6 +47,8 @@ remote_env() { ssh "$VPS_SSH" "cat $app_dir/$env_file"; }
 prod() { remote "docker compose -f $compose_file --env-file $env_file $*"; }
 env_value() { # KEY DEFAULT
   local v; v="$(printf '%s\n' "$REMOTE_ENV" | grep -E "^$1=" | head -n1 | cut -d= -f2- || true)"
+  # One pair of surrounding quotes is compose syntax (KEY="a,b"), not part of the value.
+  if [[ "$v" =~ ^\"(.*)\"$ || "$v" =~ ^\'(.*)\'$ ]]; then v="${BASH_REMATCH[1]}"; fi
   printf '%s' "${v:-$2}"
 }
 load_remote_env() { REMOTE_ENV="$(remote_env)"; }

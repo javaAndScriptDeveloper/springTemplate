@@ -55,6 +55,11 @@ out="$(FAKE_PROFILES=backup,observability FAKE_BACKUP_STATUS="last successful ba
 out="$(FAKE_PROFILES="observability,backup" FAKE_BACKUP_RC=1 FAKE_BACKUP_STATUS="no successful backup yet" "$script" deploy-status)" \
   || fail "deploy-status must not fail because backups are stale"
 [[ "$out" == *"backups: STALE — no successful backup yet"* ]] || fail "stale backup line: $out"
+# Quoted values are valid for compose; the quotes are not part of the value.
+for quoted in '"backup,observability"' "'backup'"; do
+  out="$(FAKE_PROFILES="$quoted" FAKE_BACKUP_STATUS="last successful backup: 20260928T060000Z (3h ago)" "$script" deploy-status)"
+  [[ "$out" == *"backups: ok"* ]] || fail "COMPOSE_PROFILES=$quoted reported as: $out"
+done
 
 # backup-status: runs status with the profile forced and passes its exit code through.
 : > "$SSH_LOG"
