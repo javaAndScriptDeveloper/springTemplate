@@ -87,7 +87,8 @@ Mechanics:
 
 - `profiles: ["backup"]`.
 - Environment, all with `:-` defaults (compose interpolates profiled services even when inactive, so no `:?`):
-  `RCLONE_REMOTE`, `BACKUP_CRON` (`0 */6 * * *`), `TZ` (`UTC`), `BACKUP_RETENTION_DAYS` (30), `BACKUP_MAX_AGE_HOURS`
+  `RCLONE_REMOTE`, `BACKUP_CRON` (`0 */6 * * *`), `BACKUP_TZ` (`UTC`, passed to the container as `TZ`; a bare `TZ`
+  would be picked up from the operator's shell by compose interpolation), `BACKUP_RETENTION_DAYS` (30), `BACKUP_MAX_AGE_HOURS`
   (12), `RCLONE_CONFIG=/config/rclone.conf`. `POSTGRES_*` as today (`POSTGRES_PASSWORD` keeps its existing `:?`).
 - Volumes:
   - `${RCLONE_CONFIG_FILE:-./backup/rclone.conf}:/config/rclone.conf` — **read-write**: rclone writes refreshed OAuth
@@ -113,14 +114,15 @@ Mechanics:
 | `prod-backup-now` | `$(PROD) --profile backup run --rm backup once` |
 | `prod-backup-status` | `$(PROD) --profile backup run --rm backup status` |
 | `prod-backup-list` | `$(PROD) --profile backup run --rm backup list` |
-| `prod-restore STAMP=<stamp\|latest>` | confirm → `stop app watchtower` → `run --rm -e RESTORE_CONFIRM=yes backup restore $(STAMP)` → `start app watchtower` |
+| `prod-restore STAMP=<stamp\|latest>` | confirm → stop app (and Watchtower only if running) → `run --rm -e RESTORE_CONFIRM=yes backup restore $(STAMP)` → start the same set |
 
 - `--profile backup` explicitly, so the targets work on a host whose `.env.prod` does not enable the profile (fresh host
   being restored).
 - `prod-restore` asks for `yes` typed back unless `CONFIRM=yes` is passed; usage error without `STAMP`. The old `FILE=`
   form is removed.
-- Watchtower is stopped during restore so it cannot recreate a replica mid-restore. `start` runs even if restore failed
-  (the database is then unchanged), and the target still exits non-zero.
+- Watchtower is stopped during restore only if it was running, so it cannot recreate a replica mid-restore. A
+  Watchtower stopped by `prod-rollback` stays stopped. `start` runs even if restore failed (the database is then
+  unchanged), and the target still exits non-zero.
 - Schema after restore: Liquibase at app start migrates forward; expand/contract (deployment.md §5) keeps older dumps
   compatible.
 

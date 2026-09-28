@@ -83,15 +83,70 @@ Liquibase's `DATABASECHANGELOGLOCK` serialises the two replicas at boot, so a mi
 
 ## 6. Backups and restore
 
-The `backup` service runs `pg_dump -Fc` every `BACKUP_INTERVAL_SECONDS` (daily) into `BACKUP_DIR` (`./backups`,
-relative to `deploy/`, so `deploy/backups/` on the host) and
-prunes dumps older than `BACKUP_RETENTION_DAYS` (14) **only after a successful dump**. Copy the directory off the host
-(cron + `rsync`, or object storage) — a backup on the same disk as the database is a convenience, not a backup.
+Backups are **off until you configure them** and never stay on the VPS. The `backup` service (compose profile
+`backup`) runs `pg_dump -Fc` on `BACKUP_CRON` (every 6 h) and uploads it with [rclone](https://rclone.org) to a remote
+you choose. A dump on the same disk as the database does not survive losing that disk, so there is no local mode.
+
+### Enable
+
+1. Pick a remote; anything rclone supports works. Two cheap ones:
+   - **Google Drive** (15 GB free): on your **laptop** (it opens a browser) run `rclone config` → `n` → name `gdrive`
+     → storage `drive` → scope `drive.file` → finish the browser login.
+   - **Hetzner Storage Box** (≈ €4/month, same data centre, no browser): storage `sftp`, host
+     `uXXXXX.your-storagebox.de`, port `23`, user `uXXXXX`, an SSH key or password.
+2. Copy the config to the VPS and lock it down (it holds the remote's credentials):
+   `scp ~/.config/rclone/rclone.conf <vps>:<repo>/deploy/backup/rclone.conf && ssh <vps> chmod 600 <repo>/deploy/backup/rclone.conf`
+3. In `deploy/.env.prod`: add `backup` to `COMPOSE_PROFILES` (e.g. `COMPOSE_PROFILES=backup,observability`) and set
+   `RCLONE_REMOTE=gdrive:<service-name>`. Optional: `BACKUP_CRON`, `BACKUP_TZ`, `BACKUP_RETENTION_DAYS` (30),
+   `BACKUP_MAX_AGE_HOURS` (12).
+4. `make prod-up`. If the remote or Postgres is unreachable the container exits with the reason:
+   `make prod-logs SERVICE=backup`.
+5. `make prod-backup-now`, then `make prod-backup-list`: the new stamp must be listed. Look at the remote once too.
+
+Upgrading from the old local backups: once step 5 works, delete `deploy/backups/` by hand.
+
+### What is on the remote
+
+```
+postgres/<stamp>.dump       pg_dump --format=custom, one per successful run
+pre-restore/<stamp>.dump    the database as it was just before a restore
+last-success                stamp of the last fully successful run
+```
+
+Stamps are UTC (`20260928T060000Z`). After a successful run, dumps older than `BACKUP_RETENTION_DAYS` are pruned
+from `postgres/` and `pre-restore/`; a failed run prunes nothing.
+
+### Is it working?
 
 ```bash
-make prod-backup-now                                  # one dump right now
-make prod-restore FILE=deploy/backups/20260928T020000Z.dump  # stops app, pg_restore --clean, starts app
+make prod-backup-status     # on the VPS: last success and its age, non-zero beyond BACKUP_MAX_AGE_HOURS
+make vps-backup-status      # the same from your laptop; `make vps-status` prints a one-line summary
 ```
+
+With the observability profile on, the `BackupStale` alert fires after 12 h without a successful backup
+([observability.md](observability.md)). Its threshold is in `deploy/grafana/alerting/rules.json`; change it together
+with `BACKUP_MAX_AGE_HOURS`.
+
+### Restore
+
+```bash
+make prod-backup-list                  # stamps, oldest first
+make prod-restore STAMP=latest         # or a stamp from the list; asks you to type yes
+```
+
+Stops the app replicas (and Watchtower, only if it was running) — if reading container state or stopping them fails,
+nothing is restored and whatever was stopped is started again — then uploads a dump of the **current** database to
+`pre-restore/`, restores the chosen dump in one transaction (a failure leaves the database unchanged), then starts
+everything again either way; a failed restore still leaves the command exiting non-zero. `latest` means the last
+*successful* run, never merely the newest file. The app migrates the schema forward at start (Liquibase);
+expand/contract (§5) keeps older dumps compatible.
+
+To undo a restore, copy the safety dump back into `postgres/` and restore it:
+`docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod --profile backup run --rm --entrypoint rclone backup copyto "$RCLONE_REMOTE/pre-restore/<stamp>.dump" "$RCLONE_REMOTE/postgres/<stamp>.dump"`
+(with `RCLONE_REMOTE` exported in your shell), then `make prod-restore STAMP=<stamp>`.
+
+On a **new host**: `make prod-init`, copy `rclone.conf` and fill `.env.prod` as above, `make prod-up`, then
+`make prod-restore STAMP=latest`.
 
 ## 7. Memory budget
 
@@ -101,7 +156,7 @@ make prod-restore FILE=deploy/backups/20260928T020000Z.dump  # stops app, pg_res
 | app × 2 | 512 MB each (`APP_MEM_LIMIT`) | JVM heap ≤ 75 % via `JAVA_TOOL_OPTIONS`; exits on OOM so Docker restarts it |
 | db | 384 MB | `shared_buffers=128MB`, `max_connections=50` ≥ `APP_REPLICAS × DB_POOL_SIZE` + tools |
 | watchtower | 48 MB | |
-| backup | 64 MB | |
+| backup | 64 MB | only with `COMPOSE_PROFILES=backup` |
 | alloy | 128 MB | only with `COMPOSE_PROFILES=observability` |
 | **total** | **≈ 1.7 GB** | fits a 4 GB VPS with headroom for the OS and page cache |
 

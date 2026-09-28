@@ -22,7 +22,8 @@ The tree is clean at `HEAD` (build, tests, Spotless): any failure after your cha
 ## How this is hosted and deployed
 
 - One Hetzner VPS running `deploy/compose.prod.yml`: Caddy (TLS, only published ports) → 2 `app` replicas →
-  Postgres (loopback only), plus Watchtower, a pg_dump sidecar and optionally Alloy.
+  Postgres (loopback only), plus Watchtower and, by compose profile, an off-host backup sidecar (`backup`: pg_dump →
+  rclone, `BackupStale` alert; `docs/deployment.md` §6) and Alloy.
 - **Push to `main` = deploy.** `ci.yml` builds and tests, packages `ghcr.io/<owner>/<repo>:{latest,X.Y.Z,X.Y,sha-…}`,
   tags `vX.Y.Z`, publishes a GitHub Release, and waits until `${PRODUCTION_URL}/version` reports the new revision
   from every replica. Watchtower on the VPS pulls `latest` within 60 s and restarts replicas one at a time.
@@ -76,6 +77,9 @@ Grafana Cloud on merge. `DashboardJsonTest` guards it. Alerts ship only when Tel
 - `APP_REPLICAS × DB_POOL_SIZE < max_connections (50)`.
 - `stop_grace_period` (45 s) > `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE` (30 s) < `WATCHTOWER_TIMEOUT` (60 s).
 - `deploy/.env.prod` required values carry `:?` guards; keep them when adding variables.
+- `BackupStale` threshold (43200 s in `rules.json`) ≥ `BACKUP_MAX_AGE_HOURS` and ≥ 2 × the `BACKUP_CRON` interval,
+  or every late run pages. The `rclone.conf` mount stays read-write: Drive tokens refresh into it, and a read-only
+  mount works for an hour, then every backup fails.
 
 ## Process
 

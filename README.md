@@ -40,6 +40,7 @@ One VPS (Hetzner CX or CAX both work: images are amd64 + arm64), Docker installe
 | DNS | `A` record → VPS IP | Caddy obtains the Let's Encrypt certificate for it |
 | VPS `deploy/.env.prod` | `DOMAIN`, `ACME_EMAIL` (`POSTGRES_PASSWORD`, `APP_IMAGE`, `COMPOSE_PROJECT_NAME` are generated) | TLS, database, which image Watchtower follows |
 | VPS `deploy/.env.prod` (optional) | `COMPOSE_PROFILES=observability`, `GRAFANA_CLOUD_PROM_URL/USER/TOKEN` | Alloy pushes metrics to Grafana Cloud |
+| VPS `deploy/.env.prod` (recommended) | `COMPOSE_PROFILES=backup`, `RCLONE_REMOTE`; `deploy/backup/rclone.conf` | Off-host database backups ([§6](docs/deployment.md)); without it there are none |
 | GitHub → Packages | GHCR package **public**, or `docker login ghcr.io` on the VPS and set `DOCKER_CONFIG_FILE` | Watchtower must be able to pull |
 | GitHub → Variables | `PRODUCTION_URL=https://your.domain` | CI waits for the VPS to serve the new revision and records a Deployment |
 | GitHub → Secrets (optional) | `GRAFANA_URL`, `GRAFANA_API_TOKEN` | CI pushes `deploy/grafana/**` to Grafana Cloud on merge |
@@ -53,7 +54,7 @@ On the VPS:
 git clone https://github.com/<owner>/<repo>.git && cd <repo>
 make prod-init                 # writes deploy/.env.prod: generated DB password, image name from the git remote
 $EDITOR deploy/.env.prod       # DOMAIN, ACME_EMAIL, optional Grafana Cloud block
-make prod-up                   # validates the env, starts Caddy + 2 app replicas + Postgres + Watchtower + backup
+make prod-up                   # validates the env, starts Caddy + 2 app replicas + Postgres + Watchtower (+ backup, alloy by profile)
 ```
 
 Then push to `main`. Nothing on the VPS is touched again.
