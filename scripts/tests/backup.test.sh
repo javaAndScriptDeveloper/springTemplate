@@ -142,4 +142,9 @@ printf 'app_backup_last_run_success 0\n' > "$prom"
 sh "$script" metrics
 grep -qx "app_backup_last_run_success 0" "$prom" || fail "metrics overwrote an existing file"
 
+# a run whose metric cannot be written is a failed run, even though the dump and last-success succeeded.
+reset
+: > "$tmp/metrics"
+if sh "$script" once >/dev/null 2>&1; then fail "once exited 0 although the backup metric could not be written"; fi
+
 echo "backup: all passed"

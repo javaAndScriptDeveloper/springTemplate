@@ -125,7 +125,7 @@ run_once() {
 	prune "${REMOTE}/postgres"
 	prune "${REMOTE}/pre-restore"
 	echo "${stamp}" | rclone rcat "${REMOTE}/last-success" || die "could not record last-success"
-	write_metrics 1 "$(stamp_epoch "${stamp}")"
+	write_metrics 1 "$(stamp_epoch "${stamp}")" || die "could not write metrics"
 	log "backup ${stamp} complete"
 }
 
