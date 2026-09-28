@@ -144,6 +144,65 @@ locked() {
 	"$@"
 }
 
+status() {
+	[ -n "${REMOTE}" ] || die "RCLONE_REMOTE is not set"
+	last="$(last_success || true)"
+	is_stamp "${last}" || { echo "no successful backup yet"; exit 1; }
+	age_h=$(( ($(date -u +%s) - $(stamp_epoch "${last}")) / 3600 ))
+	echo "last successful backup: ${last} (${age_h}h ago)"
+	[ "${age_h}" -lt "${MAX_AGE_HOURS}" ] || { echo "OLDER THAN ${MAX_AGE_HOURS}h"; exit 1; }
+}
+
+# A dump newer than last-success comes from a run that failed after uploading it: listed, but marked, because
+# restoring it explicitly is allowed and `latest` never picks it.
+list() {
+	[ -n "${REMOTE}" ] || die "RCLONE_REMOTE is not set"
+	last="$(last_success || true)"
+	last_epoch=""
+	if is_stamp "${last}"; then last_epoch="$(stamp_epoch "${last}")"; fi
+	rclone lsf "${REMOTE}/postgres" 2>/dev/null | sort | while IFS= read -r entry; do
+		s="${entry%.dump}"
+		is_stamp "${s}" || continue
+		[ "${entry}" = "${s}.dump" ] || continue
+		if [ -n "${last_epoch}" ] && [ "$(stamp_epoch "${s}")" -gt "${last_epoch}" ]; then
+			echo "${s}  (after the last successful backup)"
+		else
+			echo "${s}"
+		fi
+	done
+}
+
+restore() {
+	[ "${RESTORE_CONFIRM:-}" = "yes" ] || die "restore overwrites the database; set RESTORE_CONFIRM=yes"
+	want="${1:-}"
+	[ -n "${want}" ] || die "usage: backup.sh restore <stamp|latest>"
+	preflight
+	if [ "${want}" = "latest" ]; then
+		# Via last-success, not the newest file: a dump whose run then failed is not a backup to restore.
+		want="$(last_success)" || die "no successful backup recorded at ${REMOTE}/last-success"
+	fi
+	is_stamp "${want}" || die "not a backup stamp: ${want}"
+	rclone lsf "${REMOTE}/postgres/${want}.dump" 2>/dev/null | grep -q . || die "no dump postgres/${want}.dump on ${REMOTE}"
+
+	safety="$(stamp_now)"
+	safety_dump="${TMP_DIR}/pre-${safety}.dump"
+	restore_dump="${TMP_DIR}/restore-${want}.dump"
+	trap 'rm -f "${safety_dump}" "${restore_dump}"' EXIT
+	pg pg_dump --format=custom --file="${safety_dump}" || die "safety dump failed; nothing changed"
+	# shellcheck disable=SC2086
+	rclone copyto ${RCLONE_FLAGS} "${safety_dump}" "${REMOTE}/pre-restore/${safety}.dump" \
+		|| die "safety dump upload failed; nothing changed"
+	log "current database saved to pre-restore/${safety}.dump"
+
+	# shellcheck disable=SC2086
+	rclone copyto ${RCLONE_FLAGS} "${REMOTE}/postgres/${want}.dump" "${restore_dump}" \
+		|| die "download of postgres/${want}.dump failed; database unchanged"
+	# One transaction: a failed restore leaves the database exactly as it was.
+	pg pg_restore --clean --if-exists --no-owner --single-transaction "${restore_dump}" \
+		|| die "pg_restore failed; database unchanged (transaction rolled back)"
+	log "database restored from postgres/${want}.dump"
+}
+
 schedule() {
 	preflight
 	metrics
@@ -162,6 +221,9 @@ case "${cmd}" in
 	-h|--help) sed -n '2,17p' "$0" ;;
 	schedule) schedule ;;
 	once) locked once ;;
+	status) status ;;
+	list) list ;;
 	metrics) metrics ;;
+	restore) locked restore "$@" ;;
 	*) die "unknown command: ${cmd} (schedule|once|status|list|metrics|restore)" ;;
 esac

@@ -147,4 +147,59 @@ reset
 : > "$tmp/metrics"
 if sh "$script" once >/dev/null 2>&1; then fail "once exited 0 although the backup metric could not be written"; fi
 
+# status: missing → non-zero; fresh → zero with the age; stale → non-zero; threshold configurable.
+reset
+if out="$(sh "$script" status 2>&1)"; then fail "status exited 0 with no backup"; fi
+[[ "$out" == *"no successful backup"* ]] || fail "status without backup: $out"
+sh "$script" once >/dev/null
+out="$(sh "$script" status)" || fail "status failed right after a backup: $out"
+[[ "$out" == *"(0h ago)"* ]] || fail "age missing: $out"
+days_ago 1 > "$store/last-success"
+if out="$(sh "$script" status)"; then fail "24h-old backup reported fresh"; fi
+[[ "$out" == *"OLDER THAN 12h"* ]] || fail "stale status: $out"
+BACKUP_MAX_AGE_HOURS=48 sh "$script" status >/dev/null || fail "BACKUP_MAX_AGE_HOURS ignored"
+
+# list: sorted stamps only; a dump newer than last-success is marked.
+reset
+mkdir -p "$store/postgres"
+for s in 20260103T000000Z 20260101T000000Z 20260102T000000Z; do echo x > "$store/postgres/$s.dump"; done
+echo x > "$store/postgres/readme.txt"
+echo 20260102T000000Z > "$store/last-success"
+out="$(sh "$script" list)"
+expected="20260101T000000Z
+20260102T000000Z
+20260103T000000Z  (after the last successful backup)"
+[[ "$out" == "$expected" ]] || fail "list: $out"
+
+# restore: refused without confirmation; `latest` = last-success even when a newer dump exists; safety dump of the
+# current database uploaded before pg_restore; one transaction; temp files removed.
+reset
+sh "$script" once >/dev/null
+good="$(cat "$store/last-success")"
+echo "dump-of-half-run" > "$store/postgres/29990101T000000Z.dump"
+: > "$CALL_LOG"
+if sh "$script" restore latest >/dev/null 2>&1; then fail "restore ran without RESTORE_CONFIRM=yes"; fi
+grep -q '^pg_' "$CALL_LOG" && fail "unconfirmed restore touched the database: $(cat "$CALL_LOG")"
+: > "$CALL_LOG"
+FAKE_DB_STATE=current RESTORE_CONFIRM=yes sh "$script" restore latest >/dev/null \
+  || fail "restore latest failed: $(cat "$CALL_LOG")"
+grep -q '^pg_restore .*<= dump-of-db$' "$CALL_LOG" || fail "latest did not restore the last successful dump: $(cat "$CALL_LOG")"
+grep -q -- '--single-transaction' "$CALL_LOG" || fail "restore is not one transaction"
+safety=("$store"/pre-restore/*.dump)
+[[ -f "${safety[0]}" && "$(cat "${safety[0]}")" == dump-of-current ]] || fail "no safety dump of the current database"
+upload_line="$(grep -n 'rclone copyto .*pre-restore/' "$CALL_LOG" | cut -d: -f1)"
+restore_line="$(grep -n '^pg_restore' "$CALL_LOG" | cut -d: -f1)"
+(( upload_line < restore_line )) || fail "safety dump uploaded after pg_restore"
+compgen -G "$tmp/work/*.dump" >/dev/null && fail "restore left dumps in the temp dir"
+
+# restore: unknown stamp, malformed stamp, failed safety dump → nothing restored.
+: > "$CALL_LOG"
+if RESTORE_CONFIRM=yes sh "$script" restore 20000101T000000Z >/dev/null 2>&1; then fail "missing stamp exited 0"; fi
+if RESTORE_CONFIRM=yes sh "$script" restore ../etc >/dev/null 2>&1; then fail "malformed stamp exited 0"; fi
+grep -q '^pg_' "$CALL_LOG" && fail "bad stamp still touched the database: $(cat "$CALL_LOG")"
+if FAKE_PG_DUMP_FAIL=1 RESTORE_CONFIRM=yes sh "$script" restore "$good" >/dev/null 2>&1; then
+  fail "restore exited 0 although the safety dump failed"
+fi
+grep -q '^pg_restore' "$CALL_LOG" && fail "restored although the safety dump failed"
+
 echo "backup: all passed"
