@@ -11,7 +11,8 @@
 #   ssh                  shell in the app directory
 #   env                  deploy/.env.prod with secret values masked
 #   ps | logs [service]  production compose status / logs
-#   deploy-status        image tag per replica and what /version answers
+#   deploy-status        image tag per replica, what /version answers, and whether backups are fresh
+#   backup-status        age of the last successful off-host backup; non-zero when stale or missing
 #   tunnel               forward localhost:$VPS_DB_LOCAL_PORT → Postgres on the VPS until Ctrl-C
 #   psql [sql]           interactive psql through the tunnel, or run one statement and exit
 #   datagrip             open the tunnel in the background and print a ready-to-paste JDBC URL
@@ -30,7 +31,7 @@ if [[ -f "$root/.env" ]]; then
   done < <(grep -E '^[A-Z_]+=' "$root/.env" || true)
 fi
 
-usage() { sed -n '2,20p' "$0" >&2; exit 2; }
+usage() { sed -n '2,21p' "$0" >&2; exit 2; }
 cmd="${1:-}"; shift || true
 [[ -n "$cmd" ]] || usage
 
@@ -73,7 +74,19 @@ case "$cmd" in
     prod "ps --format '{{.Service}} {{.Image}} {{.Status}}'" | grep -E '^app ' || true
     load_remote_env
     domain="$(env_value DOMAIN "")"
-    [[ -n "$domain" ]] && { echo "https://${domain}/version →"; curl -fsS --max-time 10 "https://${domain}/version" || true; echo; } ;;
+    [[ -n "$domain" ]] && { echo "https://${domain}/version →"; curl -fsS --max-time 10 "https://${domain}/version" || true; echo; }
+    profiles="$(env_value COMPOSE_PROFILES "")"
+    if [[ ",${profiles// /}," != *",backup,"* ]]; then
+      echo "backups: DISABLED (COMPOSE_PROFILES lacks backup; docs/deployment.md §6)"
+    elif status_out="$(prod "--profile backup run --rm -T backup status" 2>/dev/null)"; then
+      echo "backups: ok — ${status_out//$'\n'/; }"
+    else
+      status_out="${status_out//$'\n'/; }"
+      echo "backups: STALE — ${status_out:-no answer; run make vps-backup-status}"
+    fi ;;
+
+  backup-status)
+    prod "--profile backup run --rm -T backup status" ;;
 
   tunnel)
     load_remote_env

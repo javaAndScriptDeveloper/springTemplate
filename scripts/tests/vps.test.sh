@@ -12,11 +12,13 @@ cat > "$tmp/bin/ssh" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SSH_LOG"
 case "$*" in
-  *"cat "*".env.prod"*) printf 'POSTGRES_DB=app\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=s3cret\nPOSTGRES_HOST_PORT=5433\nDOMAIN=example.com\nGRAFANA_CLOUD_PROM_TOKEN=tok\n' ;;
+  *"cat "*".env.prod"*) printf 'POSTGRES_DB=app\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=s3cret\nPOSTGRES_HOST_PORT=5433\nDOMAIN=example.com\nGRAFANA_CLOUD_PROM_TOKEN=tok\nCOMPOSE_PROFILES=%s\n' "${FAKE_PROFILES:-}" ;;
+  *"backup status"*) [[ -n "${FAKE_BACKUP_STATUS:-}" ]] && printf '%s\n' "$FAKE_BACKUP_STATUS"; exit "${FAKE_BACKUP_RC:-0}" ;;
   *) echo "fake-ssh: $*" ;;
 esac
 FAKE
 chmod +x "$tmp/bin/ssh"
+printf '#!/usr/bin/env bash\necho %s\n' "'{\"version\":\"1.0.0\"}'" > "$tmp/bin/curl"; chmod +x "$tmp/bin/curl"
 export PATH="$tmp/bin:$PATH" SSH_LOG="$tmp/ssh.log"
 cd "$tmp"   # no .env here: everything must come from the environment
 
@@ -44,5 +46,19 @@ grep -q -- "-L 15432:127.0.0.1:5433" "$SSH_LOG" && fail "tunnel opened despite -
 "$script" ps >/dev/null
 grep -q "cd /srv/app" "$SSH_LOG" || fail "ps did not cd into VPS_APP_DIR: $(cat "$SSH_LOG")"
 grep -q "compose.prod.yml" "$SSH_LOG" || fail "ps did not use the prod compose file: $(cat "$SSH_LOG")"
+
+# deploy-status: one backup line, three states.
+out="$(FAKE_PROFILES=observability "$script" deploy-status)"
+[[ "$out" == *"backups: DISABLED"* ]] || fail "disabled backups not reported: $out"
+out="$(FAKE_PROFILES=backup,observability FAKE_BACKUP_STATUS="last successful backup: 20260928T060000Z (3h ago)" "$script" deploy-status)"
+[[ "$out" == *"backups: ok — last successful backup: 20260928T060000Z (3h ago)"* ]] || fail "fresh backup line: $out"
+out="$(FAKE_PROFILES="observability,backup" FAKE_BACKUP_RC=1 FAKE_BACKUP_STATUS="no successful backup yet" "$script" deploy-status)" \
+  || fail "deploy-status must not fail because backups are stale"
+[[ "$out" == *"backups: STALE — no successful backup yet"* ]] || fail "stale backup line: $out"
+
+# backup-status: runs status with the profile forced and passes its exit code through.
+: > "$SSH_LOG"
+if FAKE_BACKUP_RC=1 "$script" backup-status >/dev/null; then fail "backup-status hid a stale backup"; fi
+grep -q -- "--profile backup run --rm -T backup status" "$SSH_LOG" || fail "backup-status command: $(cat "$SSH_LOG")"
 
 echo "vps: all passed"

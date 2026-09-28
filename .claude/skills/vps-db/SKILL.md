@@ -15,6 +15,7 @@ call and never written to disk here. If `VPS_SSH` is missing, ask the user for `
 | Need | Run |
 |---|---|
 | What is deployed right now | `scripts/vps.sh deploy-status` (image tag per replica + `/version`) |
+| Are backups working | `scripts/vps.sh backup-status` (non-zero when stale/missing); `deploy-status` shows a one-line summary |
 | Containers and health | `scripts/vps.sh ps` |
 | Logs | `scripts/vps.sh logs app` (or `caddy`, `watchtower`, `db`, `backup`) |
 | Config on the VPS, secrets masked | `scripts/vps.sh env` |
@@ -34,6 +35,8 @@ Close it with `pkill -f 'ssh .*-L 15432:'` when done.
 - **Never paste secrets into the chat.** Use `env` (masked), not `cat`. The JDBC URL from `datagrip` contains the
   password: show it once because the user asked for it, do not repeat it in summaries.
 - Schema belongs to Liquibase. Never fix a schema problem with ad-hoc DDL in prod; write a changeset.
-- Before a restore or rollback, read `docs/deployment.md` (rollback + expand/contract rules).
+- Before a restore or rollback, read `docs/deployment.md` (§6 backups/restore, rollback, expand/contract rules).
+- **Never run a restore.** `make prod-restore` overwrites the production database; hand the user the command
+  (`scripts/vps.sh ssh`, then `make prod-backup-list` and `make prod-restore STAMP=<stamp|latest>`) and let them run it.
 - A `deploy` job failure means the image is published but the host did not pick it up: check
   `scripts/vps.sh logs watchtower` first (`Scanned=…` lines and `DOCKER_API_VERSION` errors).
