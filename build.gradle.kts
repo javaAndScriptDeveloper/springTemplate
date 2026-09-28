@@ -94,7 +94,7 @@ dependencyManagement {
     imports {
         mavenBom("org.springframework.cloud:spring-cloud-dependencies:${property("springCloudVersion")}")
         // Boot 4.1 no longer manages Testcontainers versions; pin them via the Testcontainers BOM.
-        mavenBom("org.testcontainers:testcontainers-bom:1.21.4")
+        mavenBom("org.testcontainers:testcontainers-bom:2.0.5")
     }
 }
 
