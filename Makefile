@@ -1,8 +1,10 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean
+.PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean observability-up observability-down
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
+# Local image tag; CI publishes ghcr.io/<owner>/<repo> instead.
+APP_NAME := $(shell basename $(CURDIR))
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -44,16 +46,24 @@ db-up: ## Start the local Postgres in the background
 	docker compose --env-file $(ENV_FILE) up -d db
 
 db-down: ## Stop the local Postgres
-	docker compose down
+	docker compose stop db
 
-up: ## Build & run the full stack (app + db) with $(ENV_FILE)
+up: ## Build the jar + image and run app + db with $(ENV_FILE)
+	./gradlew bootJar -q
 	docker compose --env-file $(ENV_FILE) --profile full up --build -d
 
 down: ## Stop the full stack
 	docker compose --profile full down
 
-image: ## Build the OCI image (tag: spring-template)
-	docker build -t spring-template .
+image: ## Build the jar and the OCI image (tag: $(APP_NAME))
+	./gradlew bootJar -q
+	docker build -t $(APP_NAME) .
+
+observability-up: ## Start local Prometheus + Grafana (http://localhost:3000) + Alloy
+	docker compose --env-file $(ENV_FILE) --profile observability up -d
+
+observability-down: ## Stop the local observability stack
+	docker compose --profile observability down
 
 clean: ## Remove build artifacts
 	./gradlew clean

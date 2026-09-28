@@ -1,0 +1,5 @@
+# Local harness only. Nothing is scraped here: Alloy remote-writes into this Prometheus exactly as it writes to
+# Grafana Cloud, so the push path you exercise on the laptop is the one production uses.
+global:
+  scrape_interval: 30s
+scrape_configs: []
