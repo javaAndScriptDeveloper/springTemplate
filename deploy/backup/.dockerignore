@@ -1,0 +1,4 @@
+# Allowlist: the image needs only backup.sh. rclone/ (Drive/Storage Box tokens) must never enter the build context.
+*
+!backup.sh
+!Dockerfile

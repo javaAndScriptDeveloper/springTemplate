@@ -54,6 +54,16 @@ grep -q 'target: /var/lock/backup' <<<"$rendered_backup" || fail "backup lock is
 grep -q 'target: /metrics$' <<<"$rendered_backup" || fail "backup metrics volume missing"
 git -C "$root" check-ignore -q deploy/backup/rclone/rclone.conf || fail "deploy/backup/rclone/rclone.conf is not gitignored"
 
+# The rclone tokens live next to the Dockerfile: the build context must carry only what the image needs.
+[[ -f "$root/deploy/backup/.dockerignore" ]] || fail "deploy/backup has no .dockerignore (rclone tokens would enter the build context)"
+ctx="$(mktemp -d)"; mkdir -p "$ctx/rclone"; echo secret > "$ctx/rclone/rclone.conf"
+cp "$root/deploy/backup/backup.sh" "$root/deploy/backup/.dockerignore" "$ctx/"
+printf 'FROM busybox\nCOPY . /ctx\nRUN find /ctx -type f | sort\n' > "$ctx/Dockerfile.ctx"
+listing="$(docker build --no-cache --progress=plain -f "$ctx/Dockerfile.ctx" "$ctx" 2>&1)" || fail "context probe build failed: $listing"
+rm -rf "$ctx"
+grep -q '/ctx/backup.sh' <<<"$listing" || fail "backup.sh missing from the build context"
+grep -q '/ctx/rclone' <<<"$listing" && fail "rclone config reaches the docker build context"
+
 sh -n "$root/deploy/backup/backup.sh" || fail "backup.sh has a syntax error"
 if command -v shellcheck >/dev/null; then shellcheck -s sh "$root/deploy/backup/backup.sh" || fail "shellcheck backup.sh"; fi
 
