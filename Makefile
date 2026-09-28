@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean observability-up observability-down \
-	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-restore prod-rollback grafana-push grafana-push-cloud grafana-pull
+	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-restore prod-rollback grafana-push grafana-push-cloud grafana-pull vps-ssh vps-ps vps-logs vps-status vps-psql vps-datagrip rename
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
@@ -79,6 +79,30 @@ grafana-pull: ## Export the dashboard from local Grafana back into deploy/grafan
 
 clean: ## Remove build artifacts
 	./gradlew clean
+
+# ------------------------------------------------------------------------------------------- production, from this machine
+
+vps-ssh: ## Shell on the VPS in the app directory (VPS_SSH from .env)
+	scripts/vps.sh ssh
+
+vps-ps: ## Production containers and health
+	scripts/vps.sh ps
+
+vps-logs: ## Tail production logs (SERVICE=app)
+	scripts/vps.sh logs $(SERVICE)
+
+vps-status: ## Image tag per replica and what /version answers
+	scripts/vps.sh deploy-status
+
+vps-psql: ## psql into the production database through an SSH tunnel (SQL="select 1" for one statement)
+	scripts/vps.sh psql $(SQL)
+
+vps-datagrip: ## Open the DB tunnel and print a JDBC URL to paste into DataGrip
+	scripts/vps.sh datagrip
+
+rename: ## Make the template yours: make rename PKG=com.acme.shop APP=shop
+	@test -n "$(PKG)" -a -n "$(APP)" || (echo "usage: make rename PKG=com.acme.shop APP=shop" && exit 1)
+	scripts/rename-package.sh $(PKG) $(APP)
 
 # ---------------------------------------------------------------------------------------------------- production (VPS)
 
