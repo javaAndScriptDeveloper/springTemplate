@@ -1,0 +1,6 @@
+# Accepted Trivy findings, one ID per line, each with its reason. Never silence a scan with continue-on-error;
+# record the acceptance here instead. Plain format (not YAML): it is what trivy-action's `trivyignores` consumes.
+
+# deploy/backup/Dockerfile runs as root: pg_dump writes to a host bind mount that Docker creates root-owned, and the
+# sidecar has no published port and only the `data` network. The app image does run as a non-root user.
+DS-0002

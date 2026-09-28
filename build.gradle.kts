@@ -29,6 +29,10 @@ dependencyLocking {
 }
 
 extra["springCloudVersion"] = "2025.1.2"
+// Security bumps ahead of the Boot BOM (trivy fails the build on fixable HIGH/CRITICAL CVEs). Drop each override
+// once the BOM catches up; `./gradlew dependencyInsight --dependency <name>` shows what is in effect.
+extra["tomcat.version"] = "11.0.26"
+extra["postgresql.version"] = "42.7.12"
 
 dependencies {
     // Lombok
@@ -88,6 +92,13 @@ dependencies {
     testImplementation("org.instancio:instancio-junit:5.4.1")
     // Architecture rules enforced as tests (layering, naming, no field injection)
     testImplementation("com.tngtech.archunit:archunit-junit5:1.4.2")
+
+    constraints {
+        // Transitive of spring-cloud-starter; 1.81.1 carries CVE-2026-8763 and CVE-2026-13506.
+        implementation("org.bouncycastle:bcprov-jdk18on:1.85") {
+            because("CVE-2026-8763 / CVE-2026-13506 in the version spring-cloud-starter 5.0.2 pulls")
+        }
+    }
 }
 
 dependencyManagement {

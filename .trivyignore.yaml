@@ -1,8 +1,0 @@
-# Accepted Trivy findings, each with a reason. Never silence a scan with continue-on-error; record it here instead.
-#
-# vulnerabilities:
-#   - id: CVE-2026-XXXXX
-#     paths: ["gradle.lockfile"]
-#     statement: "Only reachable through X, which this service does not use. Re-check when the fix ships."
-vulnerabilities: []
-misconfigurations: []
