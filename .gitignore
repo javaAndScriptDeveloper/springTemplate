@@ -24,7 +24,7 @@ Thumbs.db
 .env.local
 deploy/.env.prod
 deploy/backups/
-deploy/backup/rclone.conf
+deploy/backup/rclone/
 *.log
 
 # claude-mem drops empty CLAUDE.md stubs into every directory; only the root one is the real, committed file.

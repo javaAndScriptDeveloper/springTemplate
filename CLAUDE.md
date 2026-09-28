@@ -78,8 +78,10 @@ Grafana Cloud on merge. `DashboardJsonTest` guards it. Alerts ship only when Tel
 - `stop_grace_period` (45 s) > `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE` (30 s) < `WATCHTOWER_TIMEOUT` (60 s).
 - `deploy/.env.prod` required values carry `:?` guards; keep them when adding variables.
 - `BackupStale` threshold (43200 s in `rules.json`) ≥ `BACKUP_MAX_AGE_HOURS` and ≥ 2 × the `BACKUP_CRON` interval,
-  or every late run pages. The `rclone.conf` mount stays read-write: Drive tokens refresh into it, and a read-only
-  mount works for an hour, then every backup fails.
+  or every late run pages.
+- The rclone config is a mounted read-write **directory** (`deploy/backup/rclone/`), never a single file: rclone
+  saves refreshed tokens by rename, so a single-file mount logs a save error on every token refresh and breaks
+  providers that rotate refresh tokens.
 
 ## Process
 

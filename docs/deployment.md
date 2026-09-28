@@ -95,7 +95,10 @@ you choose. A dump on the same disk as the database does not survive losing that
    - **Hetzner Storage Box** (≈ €4/month, same data centre, no browser): storage `sftp`, host
      `uXXXXX.your-storagebox.de`, port `23`, user `uXXXXX`, an SSH key or password.
 2. Copy the config to the VPS and lock it down (it holds the remote's credentials):
-   `scp ~/.config/rclone/rclone.conf <vps>:<repo>/deploy/backup/rclone.conf && ssh <vps> chmod 600 <repo>/deploy/backup/rclone.conf`
+   `ssh <vps> 'mkdir -p <repo>/deploy/backup/rclone && chmod 700 <repo>/deploy/backup/rclone'`, then
+   `scp ~/.config/rclone/rclone.conf <vps>:<repo>/deploy/backup/rclone/rclone.conf && ssh <vps> chmod 600 <repo>/deploy/backup/rclone/rclone.conf`.
+   The container mounts the directory, not the file: rclone saves refreshed tokens by renaming a new file over
+   `rclone.conf`, which a single-file mount rejects.
 3. In `deploy/.env.prod`: add `backup` to `COMPOSE_PROFILES` (e.g. `COMPOSE_PROFILES=backup,observability`) and set
    `RCLONE_REMOTE=gdrive:<service-name>`. Optional: `BACKUP_CRON`, `BACKUP_TZ`, `BACKUP_RETENTION_DAYS` (30),
    `BACKUP_MAX_AGE_HOURS` (12).

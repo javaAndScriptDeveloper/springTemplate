@@ -167,16 +167,17 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-app}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make prod-init (generates POSTGRES_PASSWORD)}
       RCLONE_REMOTE: ${RCLONE_REMOTE:-}
-      RCLONE_CONFIG: /config/rclone.conf
+      RCLONE_CONFIG: /config/rclone/rclone.conf
       BACKUP_CRON: ${BACKUP_CRON:-0 */6 * * *}
       TZ: ${BACKUP_TZ:-UTC}
       BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
       BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-12}
     volumes:
-      # Read-write: rclone stores refreshed OAuth tokens (Google Drive) back into this file. Must exist on the host.
+      # A directory, read-write: rclone saves refreshed OAuth tokens (Google Drive) by writing a new file and renaming
+      # it over rclone.conf, which a single-file bind mount rejects. Must exist on the host.
       - type: bind
-        source: ${RCLONE_CONFIG_FILE:-./backup/rclone.conf}
-        target: /config/rclone.conf
+        source: ${RCLONE_CONFIG_DIR:-./backup/rclone}
+        target: /config/rclone
         bind:
           create_host_path: false
       # Shared by the scheduler and every `docker compose run --rm backup …`, so they cannot overlap.

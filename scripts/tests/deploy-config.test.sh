@@ -43,12 +43,16 @@ docker run --rm -v "$root/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=ex
 grep -qE '^  backup:' <<<"$rendered" && fail "backup service must only exist with the backup profile"
 rendered_backup="$(docker compose -f "$root/deploy/compose.prod.yml" --env-file "$here/fixtures/env.prod.test" --profile backup config)" \
   || fail "deploy/compose.prod.yml does not validate with the backup profile"
-grep -q 'RCLONE_CONFIG: /config/rclone.conf' <<<"$rendered_backup" || fail "backup does not point rclone at the mounted config"
-# A missing rclone.conf must fail loudly, not become a directory the later scp lands inside.
-grep -q 'create_host_path: false' <<<"$rendered_backup" || fail "rclone.conf mount would be auto-created as a directory"
+# rclone saves its config (refreshed tokens) by rename, which a single-file bind mount rejects: mount the directory.
+grep -q 'RCLONE_CONFIG: /config/rclone/rclone.conf' <<<"$rendered_backup" \
+  || fail "backup does not point rclone at the config inside the mounted directory"
+grep -q 'target: /config/rclone$' <<<"$rendered_backup" || fail "rclone config is not mounted as a directory"
+grep -q 'target: /config/rclone.conf' <<<"$rendered_backup" && fail "rclone.conf is still mounted as a single file"
+# A missing config directory must fail loudly, not be created empty (backups would then fail far less clearly).
+grep -q 'create_host_path: false' <<<"$rendered_backup" || fail "rclone config mount would be auto-created"
 grep -q 'target: /var/lock/backup' <<<"$rendered_backup" || fail "backup lock is not on a shared volume"
 grep -q 'target: /metrics$' <<<"$rendered_backup" || fail "backup metrics volume missing"
-git -C "$root" check-ignore -q deploy/backup/rclone.conf || fail "deploy/backup/rclone.conf is not gitignored"
+git -C "$root" check-ignore -q deploy/backup/rclone/rclone.conf || fail "deploy/backup/rclone/rclone.conf is not gitignored"
 
 sh -n "$root/deploy/backup/backup.sh" || fail "backup.sh has a syntax error"
 if command -v shellcheck >/dev/null; then shellcheck -s sh "$root/deploy/backup/backup.sh" || fail "shellcheck backup.sh"; fi
