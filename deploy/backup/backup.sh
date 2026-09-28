@@ -146,6 +146,10 @@ locked() {
 
 status() {
 	[ -n "${REMOTE}" ] || die "RCLONE_REMOTE is not set"
+	# last_success cannot tell "no file" from "no remote". rclone exits 3 for a missing directory: reachable, empty.
+	rc=0
+	rclone lsf "${REMOTE}" >/dev/null 2>&1 || rc=$?
+	[ "${rc}" -eq 0 ] || [ "${rc}" -eq 3 ] || { echo "cannot reach ${REMOTE} (rclone exit ${rc})"; exit 1; }
 	last="$(last_success || true)"
 	is_stamp "${last}" || { echo "no successful backup yet"; exit 1; }
 	age_h=$(( ($(date -u +%s) - $(stamp_epoch "${last}")) / 3600 ))

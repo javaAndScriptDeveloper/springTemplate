@@ -16,6 +16,8 @@ cat > "$tmp/bin/rclone" <<'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
 echo "rclone $*" >> "$CALL_LOG"
+# An unreachable remote (network, credentials): rclone's generic error, exit 1.
+[[ "${FAKE_REMOTE_DOWN:-}" != 1 ]] || { echo "fake rclone: remote unreachable" >&2; exit 1; }
 map() { if [[ "$1" == *:* ]]; then printf '%s/%s/%s' "$FAKE_REMOTE_ROOT" "${1%%:*}" "${1#*:}"; else printf '%s' "$1"; fi; }
 cmd="$1"; shift
 pos=()
@@ -166,6 +168,10 @@ days_ago 1 > "$store/last-success"
 if out="$(sh "$script" status)"; then fail "24h-old backup reported fresh"; fi
 [[ "$out" == *"OLDER THAN 12h"* ]] || fail "stale status: $out"
 BACKUP_MAX_AGE_HOURS=48 sh "$script" status >/dev/null || fail "BACKUP_MAX_AGE_HOURS ignored"
+# an unreachable remote is reported as such, not as "no successful backup yet".
+if out="$(FAKE_REMOTE_DOWN=1 sh "$script" status 2>&1)"; then fail "status exited 0 with the remote unreachable"; fi
+[[ "$out" == *"cannot reach remote:svc"* ]] || fail "unreachable remote not reported: $out"
+[[ "$out" == *"no successful backup"* ]] && fail "unreachable remote reported as missing backup: $out"
 
 # list: sorted stamps only; a dump newer than last-success is marked.
 reset
