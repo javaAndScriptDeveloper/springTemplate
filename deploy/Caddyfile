@@ -1,0 +1,63 @@
+# Production reverse proxy. The only service with published ports.
+#
+# Caddy terminates TLS (Let's Encrypt, obtained and renewed on its own) for {$DOMAIN} and load-balances across the
+# app replicas. Both values come from deploy/.env.prod via compose; nothing here is site-specific.
+
+{
+	email {$ACME_EMAIL}
+	# Let's Encrypt rate-limits failed real-certificate attempts hard. While DNS is still propagating, uncomment
+	# this to get untrusted staging certificates instead, then comment it out again.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Actuator lives on the management port (8081), which is never proxied. This is a second lock on the same door:
+	# even if someone moves actuator back to 8080, it stays unreachable from the internet.
+	@actuator path /actuator*
+	respond @actuator 404
+
+	# Upstreams are resolved from Docker's embedded DNS rather than pinned at startup. A replaced replica gets a new
+	# container IP; re-resolving every 5 seconds picks it up with no reload, which is what lets Watchtower roll
+	# replicas underneath us.
+	reverse_proxy {
+		dynamic a {
+			name app
+			port 8080
+			refresh 5s
+		}
+
+		# Dynamic upstreams cannot use active health checks, so health is passive: a replica that refuses a connection
+		# is taken out of rotation for fail_duration.
+		fail_duration 10s
+		max_fails 1
+		unhealthy_status 5xx
+
+		# Retry only on connection-level failure: the request never reached the application, so re-sending it cannot
+		# double-apply anything. A request that was accepted and then errored is returned to the client untouched.
+		lb_policy round_robin
+		lb_try_duration 5s
+		lb_try_interval 250ms
+
+		transport http {
+			dial_timeout 2s
+			response_header_timeout 60s
+		}
+
+		header_up X-Real-IP {remote_host}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

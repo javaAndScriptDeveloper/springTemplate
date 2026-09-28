@@ -1,10 +1,13 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean observability-up observability-down
+.PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean observability-up observability-down \
+	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-restore prod-rollback
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
 # Local image tag; CI publishes ghcr.io/<owner>/<repo> instead.
 APP_NAME := $(shell basename $(CURDIR))
+# Production stack (run these on the VPS). Everything reads deploy/.env.prod, created by `make prod-init`.
+PROD := docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -67,3 +70,42 @@ observability-down: ## Stop the local observability stack
 
 clean: ## Remove build artifacts
 	./gradlew clean
+
+# ---------------------------------------------------------------------------------------------------- production (VPS)
+
+prod-init: ## Create deploy/.env.prod with a generated DB password (asks for confirmation)
+	scripts/init-prod-env.sh
+
+prod-up: ## Validate deploy/.env.prod, then start/refresh the production stack and wait for health
+	$(PROD) config -q
+	$(PROD) up -d --remove-orphans --wait
+
+prod-down: ## Stop the production stack (volumes are kept)
+	$(PROD) down
+
+prod-ps: ## Show production containers and their health
+	$(PROD) ps
+
+prod-logs: ## Tail production logs (SERVICE=app to narrow)
+	$(PROD) logs -f --tail=200 $(SERVICE)
+
+prod-pull: ## Pull the current APP_IMAGE_TAG now instead of waiting for Watchtower
+	$(PROD) pull app
+	$(PROD) up -d app
+
+prod-backup-now: ## Run one pg_dump immediately (see deploy/backup)
+	$(PROD) run --rm backup once
+
+prod-restore: ## Restore a dump: make prod-restore FILE=backups/<stamp>.dump  (stops app replicas first)
+	@test -n "$(FILE)" || (echo "usage: make prod-restore FILE=backups/<stamp>.dump" && exit 1)
+	$(PROD) stop app
+	$(PROD) exec -T db sh -c 'pg_restore --clean --if-exists --no-owner -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"' < $(FILE)
+	$(PROD) start app
+
+prod-rollback: ## Pin the app to an earlier image: make prod-rollback TAG=1.4.1  (pauses Watchtower)
+	@test -n "$(TAG)" || (echo "usage: make prod-rollback TAG=<version|sha-xxxxxxx>" && exit 1)
+	$(PROD) stop watchtower
+	sed -i 's/^APP_IMAGE_TAG=.*/APP_IMAGE_TAG=$(TAG)/' deploy/.env.prod
+	$(PROD) up -d --force-recreate app
+	@echo "Pinned to $(TAG). Watchtower is stopped; when ready to follow releases again:"
+	@echo "  sed -i 's/^APP_IMAGE_TAG=.*/APP_IMAGE_TAG=latest/' deploy/.env.prod && $(PROD) up -d app watchtower"

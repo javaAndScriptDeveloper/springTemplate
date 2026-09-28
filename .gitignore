@@ -22,6 +22,8 @@ Thumbs.db
 ### Env / secrets ###
 .env
 .env.local
+deploy/.env.prod
+deploy/backups/
 *.log
 
 CLAUDE.md

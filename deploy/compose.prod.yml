@@ -1,0 +1,204 @@
+# Production stack for one VPS. Run from the repository root:
+#
+#   make prod-init      # once: creates deploy/.env.prod with a generated DB password
+#   make prod-up        # validates the env, then `up -d --wait`
+#
+# After that nothing on the host is touched by hand. CI publishes ${APP_IMAGE}:latest on every push to main;
+# Watchtower notices the new digest within WATCHTOWER_POLL_INTERVAL seconds and replaces the app replicas one at a
+# time. Caddy re-resolves the `app` service name every 5 seconds, so a replaced replica joins the rotation on its own.
+#
+# Only Caddy publishes ports (80/443). Postgres listens on the loopback interface for SSH tunnels. The management
+# port (8081) is neither published nor proxied.
+#
+# Memory budget (mem_limit): caddy 64m + app 2×512m + db 384m + watchtower 48m + backup 64m + alloy 128m ≈ 1.7 GB,
+# which fits a 4 GB VPS with room for the OS. Re-check this sum whenever a service is added or a limit raised.
+
+name: ${COMPOSE_PROJECT_NAME:?run make prod-init (sets COMPOSE_PROJECT_NAME from the git remote)}
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in deploy/.env.prod (public hostname; DNS must already point here)}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in deploy/.env.prod (Let's Encrypt account e-mail)}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates live here; losing this volume means re-requesting them and meeting Let's Encrypt rate limits.
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    mem_limit: 64m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  app:
+    image: ${APP_IMAGE:?run make prod-init (sets APP_IMAGE from the git remote)}:${APP_IMAGE_TAG:-latest}
+    restart: unless-stopped
+    # No container_name: it would collide across replicas.
+    deploy:
+      replicas: ${APP_REPLICAS:-2}
+    # Spring's graceful shutdown gets SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE to drain; this must be longer.
+    stop_grace_period: 45s
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      APP_NAME: ${COMPOSE_PROJECT_NAME}
+      APP_ENV: ${APP_ENV:-prod}
+      # Actuator on its own port: never published by this file, never proxied by the Caddyfile.
+      MANAGEMENT_PORT: "8081"
+      SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE: 30s
+      DB_URL: jdbc:postgresql://db:5432/${POSTGRES_DB:-app}
+      DB_USERNAME: ${POSTGRES_USER:-app}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?run make prod-init (generates POSTGRES_PASSWORD)}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8081/actuator/health | grep -q '\"status\":\"UP\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # Liquibase runs at boot and the second replica waits on its lock; give both time before counting failures.
+      start_period: 90s
+    networks: [edge, data]
+    mem_limit: ${APP_MEM_LIMIT:-512m}
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    # Loopback only. Docker's iptables rules bypass the host firewall for a 0.0.0.0 bind, so this is the guard.
+    ports:
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make prod-init (generates POSTGRES_PASSWORD)}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    # Sized for a small VPS; max_connections must exceed APP_REPLICAS × DB_POOL_SIZE plus a few for psql/backup.
+    command:
+      - postgres
+      - -c
+      - max_connections=50
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - work_mem=4MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - effective_cache_size=256MB
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-app} -d ${POSTGRES_DB:-app}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks: [data]
+    mem_limit: 384m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  watchtower:
+    image: containrrr/watchtower:1.7.1
+    restart: unless-stopped
+    environment:
+      # Watchtower 1.7.1 negotiates Docker API 1.25; Docker 25+ refuses anything below 1.44 and Watchtower then
+      # silently deploys nothing. This pin is what makes unattended deploys actually happen.
+      DOCKER_API_VERSION: "1.44"
+      # Only containers labelled watchtower.enable=true (the app) are ever touched.
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # Replace replicas one at a time so Caddy always has a healthy upstream.
+      WATCHTOWER_ROLLING_RESTART: "true"
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_INCLUDE_STOPPED: "false"
+      # Longer than the app's stop_grace_period, so a draining replica is not killed early.
+      WATCHTOWER_TIMEOUT: 60s
+      WATCHTOWER_POLL_INTERVAL: ${WATCHTOWER_POLL_INTERVAL:-60}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Only read when the GHCR package is private (after `docker login ghcr.io` on the host).
+      - ${DOCKER_CONFIG_DIR:-/dev/null}:/config.json:ro
+    networks: [edge]
+    mem_limit: 48m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  backup:
+    build: ./backup
+    image: ${COMPOSE_PROJECT_NAME}-backup:local
+    # Built on the host, never pulled: Watchtower must not look for it in a registry.
+    pull_policy: build
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-app}
+      POSTGRES_USER: ${POSTGRES_USER:-app}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make prod-init (generates POSTGRES_PASSWORD)}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-14}
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+    networks: [data]
+    mem_limit: 64m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  alloy:
+    # Enabled by COMPOSE_PROFILES=observability in deploy/.env.prod. No :? guards on purpose: compose interpolates
+    # every service even when its profile is inactive, and a stack without Grafana Cloud must still start.
+    profiles: ["observability"]
+    image: grafana/alloy:v1.10.0
+    restart: unless-stopped
+    command:
+      - run
+      - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
+      - /etc/alloy/config.alloy
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - alloy_data:/var/lib/alloy/data
+    environment:
+      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL:-}
+      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER:-}
+      GRAFANA_CLOUD_PROM_TOKEN: ${GRAFANA_CLOUD_PROM_TOKEN:-}
+      # Docker's embedded DNS answers `app` with every replica's address.
+      APP_METRICS_HOST: app
+      APP_METRICS_PORT: "8081"
+      APP_ENV: ${APP_ENV:-prod}
+    networks: [edge]
+    mem_limit: 128m
+    logging: *default-logging
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+networks:
+  # Only `app` joins both: a compromised proxy cannot reach the database.
+  edge:
+  data:
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+  alloy_data:
