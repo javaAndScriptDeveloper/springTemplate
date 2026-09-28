@@ -3,7 +3,7 @@ import java.time.Duration
 plugins {
     id("java")
     id("jacoco")
-    id("org.springframework.boot") version "4.1.0"
+    id("org.springframework.boot") version "4.1.1"
     id("io.spring.dependency-management") version "1.1.7"
     id("com.diffplug.spotless") version "7.2.1"
 }
@@ -59,7 +59,7 @@ dependencies {
     implementation("org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j")
 
     // API Documentation (OpenAPI 3 / Swagger UI)
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1")
 
     // Database migration. Boot 4 moved Liquibase auto-configuration into its own module: liquibase-core
     // alone is on the classpath but never runs a changeset.
@@ -87,7 +87,7 @@ dependencies {
     // Random, fully-populated test objects — the project convention over hand-built fixtures
     testImplementation("org.instancio:instancio-junit:5.4.1")
     // Architecture rules enforced as tests (layering, naming, no field injection)
-    testImplementation("com.tngtech.archunit:archunit-junit5:1.4.2")
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.5.0")
 }
 
 dependencyManagement {
