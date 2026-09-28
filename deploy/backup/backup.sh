@@ -187,7 +187,8 @@ restore() {
 	safety="$(stamp_now)"
 	safety_dump="${TMP_DIR}/pre-${safety}.dump"
 	restore_dump="${TMP_DIR}/restore-${want}.dump"
-	trap 'rm -f "${safety_dump}" "${restore_dump}"' EXIT
+	restore_sql="${TMP_DIR}/restore-${want}.sql"
+	trap 'rm -f "${safety_dump}" "${restore_dump}" "${restore_sql}"' EXIT
 	pg pg_dump --format=custom --file="${safety_dump}" || die "safety dump failed; nothing changed"
 	# shellcheck disable=SC2086
 	rclone copyto ${RCLONE_FLAGS} "${safety_dump}" "${REMOTE}/pre-restore/${safety}.dump" \
@@ -197,9 +198,15 @@ restore() {
 	# shellcheck disable=SC2086
 	rclone copyto ${RCLONE_FLAGS} "${REMOTE}/postgres/${want}.dump" "${restore_dump}" \
 		|| die "download of postgres/${want}.dump failed; database unchanged"
-	# One transaction: a failed restore leaves the database exactly as it was.
-	pg pg_restore --clean --if-exists --no-owner --single-transaction "${restore_dump}" \
-		|| die "pg_restore failed; database unchanged (transaction rolled back)"
+	# To SQL first, without a connection (not via pg: --dbname would make pg_restore restore into the database).
+	pg_restore --no-owner --file="${restore_sql}" "${restore_dump}" \
+		|| die "could not read postgres/${want}.dump; database unchanged"
+	# `pg_restore --clean` drops only what the dump contains: a table created after the dump would survive (and block
+	# the drop of anything it references). So the whole public schema is replaced, in one transaction: a failed
+	# restore leaves the database exactly as it was.
+	{ echo 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'; cat "${restore_sql}"; } \
+		| pg psql --quiet -v ON_ERROR_STOP=1 --single-transaction >/dev/null \
+		|| die "restore failed; database unchanged (transaction rolled back)"
 	log "database restored from postgres/${want}.dump"
 }
 

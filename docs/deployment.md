@@ -136,10 +136,11 @@ make prod-restore STAMP=latest         # or a stamp from the list; asks you to t
 
 Stops the app replicas (and Watchtower, only if it was running) — if reading container state or stopping them fails,
 nothing is restored and whatever was stopped is started again — then uploads a dump of the **current** database to
-`pre-restore/`, restores the chosen dump in one transaction (a failure leaves the database unchanged), then starts
-everything again either way; a failed restore still leaves the command exiting non-zero. `latest` means the last
-*successful* run, never merely the newest file. The app migrates the schema forward at start (Liquibase);
-expand/contract (§5) keeps older dumps compatible.
+`pre-restore/`, replaces the whole `public` schema with the dump's in one transaction (a failure leaves the database
+unchanged), then starts everything again either way; a failed restore still leaves the command exiting non-zero.
+`latest` means the last *successful* run, never merely the newest file. Tables created after the dump are gone
+afterwards — the database is exactly what it was at the dump, including its `databasechangelog` — and the app's
+Liquibase migrates it forward from there when it starts.
 
 To undo a restore, copy the safety dump back into `postgres/` and restore it:
 `docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod --profile backup run --rm --entrypoint rclone backup copyto "$RCLONE_REMOTE/pre-restore/<stamp>.dump" "$RCLONE_REMOTE/postgres/<stamp>.dump"`

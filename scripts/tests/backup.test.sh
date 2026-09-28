@@ -38,11 +38,19 @@ echo "pg_dump $*" >> "$CALL_LOG"
 [[ "${FAKE_PG_DUMP_FAIL:-}" != 1 ]] || exit 1
 for a in "$@"; do case "$a" in --file=*) echo "dump-of-${FAKE_DB_STATE:-db}" > "${a#--file=}" ;; esac; done
 FAKE
+# pg_restore --file=OUT IN: converts IN to SQL in OUT (here: copies IN's content) without touching a database.
 cat > "$tmp/bin/pg_restore" <<'FAKE'
 #!/usr/bin/env bash
 file="${*: -1}"
 echo "pg_restore $* <= $(cat "$file")" >> "$CALL_LOG"
 [[ "${FAKE_PG_RESTORE_FAIL:-}" != 1 ]] || exit 1
+for a in "$@"; do case "$a" in --file=*) cat "$file" > "${a#--file=}" ;; esac; done
+FAKE
+# psql: logs its arguments and, on one following line each, what it read on stdin.
+cat > "$tmp/bin/psql" <<'FAKE'
+#!/usr/bin/env bash
+{ echo "psql $*"; sed 's/^/  stdin: /'; } >> "$CALL_LOG"
+[[ "${FAKE_PSQL_FAIL:-}" != 1 ]] || exit 1
 FAKE
 cat > "$tmp/bin/pg_isready" <<'FAKE'
 #!/usr/bin/env bash
@@ -172,34 +180,61 @@ expected="20260101T000000Z
 [[ "$out" == "$expected" ]] || fail "list: $out"
 
 # restore: refused without confirmation; `latest` = last-success even when a newer dump exists; safety dump of the
-# current database uploaded before pg_restore; one transaction; temp files removed.
+# current database uploaded before anything is applied; the dump is converted to SQL without a database connection
+# and applied in one psql transaction that first replaces the public schema (objects created after the dump must not
+# survive it); temp files removed.
 reset
 sh "$script" once >/dev/null
 good="$(cat "$store/last-success")"
 echo "dump-of-half-run" > "$store/postgres/29990101T000000Z.dump"
 : > "$CALL_LOG"
 if sh "$script" restore latest >/dev/null 2>&1; then fail "restore ran without RESTORE_CONFIRM=yes"; fi
-grep -q '^pg_' "$CALL_LOG" && fail "unconfirmed restore touched the database: $(cat "$CALL_LOG")"
+grep -q '^pg_\|^psql' "$CALL_LOG" && fail "unconfirmed restore touched the database: $(cat "$CALL_LOG")"
 : > "$CALL_LOG"
 FAKE_DB_STATE=current RESTORE_CONFIRM=yes sh "$script" restore latest >/dev/null \
   || fail "restore latest failed: $(cat "$CALL_LOG")"
-grep -q '^pg_restore .*<= dump-of-db$' "$CALL_LOG" || fail "latest did not restore the last successful dump: $(cat "$CALL_LOG")"
-grep -q -- '--single-transaction' "$CALL_LOG" || fail "restore is not one transaction"
+grep -q '^pg_restore .*--file=.*<= dump-of-db$' "$CALL_LOG" || fail "last successful dump not converted to SQL: $(cat "$CALL_LOG")"
+grep '^pg_restore' "$CALL_LOG" | grep -q -- '--dbname' && fail "pg_restore connected to the database: $(cat "$CALL_LOG")"
+[[ "$(grep -c '^psql' "$CALL_LOG")" == 1 ]] || fail "expected exactly one psql call: $(cat "$CALL_LOG")"
+psql_call="$(sed -n '/^psql/,$p' "$CALL_LOG" | sed -n '1p;/^  stdin: /p')"
+[[ "$psql_call" == *"--single-transaction"* ]] || fail "restore is not one transaction: $psql_call"
+[[ "$psql_call" == *"ON_ERROR_STOP=1"* ]] || fail "psql does not stop on the first error: $psql_call"
+expected_stdin="  stdin: DROP SCHEMA public CASCADE; CREATE SCHEMA public;
+  stdin: dump-of-db"
+[[ "$(echo "$psql_call" | grep '^  stdin: ')" == "$expected_stdin" ]] \
+  || fail "psql did not get DROP SCHEMA followed by the dump: $psql_call"
 safety=("$store"/pre-restore/*.dump)
 [[ -f "${safety[0]}" && "$(cat "${safety[0]}")" == dump-of-current ]] || fail "no safety dump of the current database"
 upload_line="$(grep -n 'rclone copyto .*pre-restore/' "$CALL_LOG" | cut -d: -f1)"
-restore_line="$(grep -n '^pg_restore' "$CALL_LOG" | cut -d: -f1)"
-(( upload_line < restore_line )) || fail "safety dump uploaded after pg_restore"
-compgen -G "$tmp/work/*.dump" >/dev/null && fail "restore left dumps in the temp dir"
+psql_line="$(grep -n '^psql' "$CALL_LOG" | cut -d: -f1)"
+(( upload_line < psql_line )) || fail "safety dump uploaded after the restore was applied"
+compgen -G "$tmp/work/*" >/dev/null && fail "restore left files in the temp dir: $(ls "$tmp/work")"
+
+# restore of an explicit stamp restores exactly that dump, even one newer than last-success.
+: > "$CALL_LOG"
+RESTORE_CONFIRM=yes sh "$script" restore 29990101T000000Z >/dev/null || fail "restore <stamp> failed: $(cat "$CALL_LOG")"
+grep -qx '  stdin: dump-of-half-run' "$CALL_LOG" || fail "explicit stamp did not restore its dump: $(cat "$CALL_LOG")"
+compgen -G "$tmp/work/*" >/dev/null && fail "restore <stamp> left files in the temp dir: $(ls "$tmp/work")"
+
+# restore: a failing psql (rolled-back transaction) or a failing conversion → non-zero exit.
+if FAKE_PSQL_FAIL=1 RESTORE_CONFIRM=yes sh "$script" restore "$good" >/dev/null 2>&1; then
+  fail "restore exited 0 although psql failed"
+fi
+: > "$CALL_LOG"
+if FAKE_PG_RESTORE_FAIL=1 RESTORE_CONFIRM=yes sh "$script" restore "$good" >/dev/null 2>&1; then
+  fail "restore exited 0 although the SQL conversion failed"
+fi
+grep -q '^psql' "$CALL_LOG" && fail "applied SQL although the conversion failed: $(cat "$CALL_LOG")"
+compgen -G "$tmp/work/*" >/dev/null && fail "failed restore left files in the temp dir: $(ls "$tmp/work")"
 
 # restore: unknown stamp, malformed stamp, failed safety dump → nothing restored.
 : > "$CALL_LOG"
 if RESTORE_CONFIRM=yes sh "$script" restore 20000101T000000Z >/dev/null 2>&1; then fail "missing stamp exited 0"; fi
 if RESTORE_CONFIRM=yes sh "$script" restore ../etc >/dev/null 2>&1; then fail "malformed stamp exited 0"; fi
-grep -q '^pg_' "$CALL_LOG" && fail "bad stamp still touched the database: $(cat "$CALL_LOG")"
+grep -q '^pg_\|^psql' "$CALL_LOG" && fail "bad stamp still touched the database: $(cat "$CALL_LOG")"
 if FAKE_PG_DUMP_FAIL=1 RESTORE_CONFIRM=yes sh "$script" restore "$good" >/dev/null 2>&1; then
   fail "restore exited 0 although the safety dump failed"
 fi
-grep -q '^pg_restore' "$CALL_LOG" && fail "restored although the safety dump failed"
+grep -q '^pg_restore\|^psql' "$CALL_LOG" && fail "restored although the safety dump failed"
 
 echo "backup: all passed"
