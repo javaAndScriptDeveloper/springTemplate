@@ -186,8 +186,7 @@ tasks.jacocoTestCoverageVerification {
         rule {
             limit {
                 counter = "INSTRUCTION"
-                // Raised to 0.60 in the hardening task once the redactor and handler tests exist.
-                minimum = "0.0".toBigDecimal()
+                minimum = "0.60".toBigDecimal()
             }
         }
     }
