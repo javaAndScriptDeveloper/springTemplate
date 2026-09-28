@@ -1,0 +1,54 @@
+# Weekly dependency bumps as pull requests. Each one runs the ci workflow (tests, image build, security-fast), so
+# an upgrade with a regression never reaches main on its own. Patch and minor bumps arrive as one PR; majors stay
+# separate so they get read.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Kyiv
+    groups:
+      minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "build(deps)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Kyiv
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci(deps)"
+
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /deploy/backup
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Kyiv
+    commit-message:
+      prefix: "build(deps)"
+
+  - package-ecosystem: docker-compose
+    directories:
+      - /
+      - /deploy
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Kyiv
+    commit-message:
+      prefix: "build(deps)"

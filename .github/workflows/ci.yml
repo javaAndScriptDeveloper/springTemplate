@@ -1,4 +1,16 @@
-name: CI
+# Build, gate, publish, release, track.
+#
+# Deploys are pull-initiated: this workflow only publishes an image. Watchtower on the VPS notices the new `latest`
+# digest and rolls the app replicas one at a time; nothing here can reach the host and no SSH key exists anywhere.
+#
+# Per push to main:
+#   ghcr.io/<owner>/<repo>:latest        what Watchtower follows
+#   ghcr.io/<owner>/<repo>:X.Y.Z, :X.Y   SemVer from conventional commits (scripts/next-version.sh)
+#   ghcr.io/<owner>/<repo>:sha-<short>   immutable; what a rollback pins to
+#   git tag vX.Y.Z + GitHub Release      generated notes list the commits since the previous release
+#
+# Pull requests run the same build, security checks and image build, and publish nothing.
+name: ci
 
 on:
   push:
@@ -6,46 +18,308 @@ on:
   pull_request:
 
 concurrency:
+  # A newer commit supersedes an in-flight run of the same ref; never race two publishes.
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
+env:
+  JAVA_VERSION: "25"
+
 jobs:
   build:
+    name: Build and test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # next-version.sh and the commit lint need tags and history.
+          fetch-depth: 0
 
-      - name: Set up JDK 25
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "25"
+          java-version: ${{ env.JAVA_VERSION }}
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          # Persist the local build cache: a docs-only commit skips compile and tests entirely.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
-      - name: Check formatting
-        run: ./gradlew spotlessCheck
+      - name: Lint commit subjects
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -n "$BASE_SHA" ]; then
+            range="${BASE_SHA}..HEAD"
+          else
+            last_tag="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+            range="${last_tag:+${last_tag}..}HEAD"
+          fi
+          echo "checking ${range}"
+          scripts/lint-commits.sh "${range}"
 
-      - name: Build & test
+      - name: Script tests
+        run: scripts/tests/run.sh
+
+      - name: Build, unit and integration tests, coverage gate
         # Docker is available on ubuntu-latest, so Testcontainers works out of the box.
-        run: ./gradlew build
+        run: ./gradlew build --no-daemon
 
-      - name: Upload test reports
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: test-reports
-          path: build/reports/tests/
+          name: jar
+          path: build/libs/app.jar
+          retention-days: 3
+
+      - name: Upload test and coverage reports
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: reports
+          path: |
+            build/reports/tests/
+            build/reports/jacoco/
           if-no-files-found: ignore
 
-      - name: Upload coverage report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+  # Fast security lane: runs in parallel with the build and takes about a minute, so it adds nothing to the time from
+  # push to live. The slow scans (image CVEs against what is actually running) live in security-weekly.yml.
+  security-fast:
+    name: Secrets, dependency CVEs, workflow lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          name: coverage-report
-          path: build/reports/jacoco/
-          if-no-files-found: ignore
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: gitleaks (secrets anywhere in history)
+        run: |
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            detect --source /repo --no-banner --redact --exit-code 1
+
+      - name: trivy (lockfile, Dockerfile, compose, secrets)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret,misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          ignore-unfixed: true
+          trivyignores: .trivyignore.yaml
+
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
+      - name: zizmor (workflow misconfiguration)
+        run: uvx zizmor --min-severity medium .github/workflows
+
+  image:
+    name: Build image
+    needs: [build, security-fast]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      minor: ${{ steps.ver.outputs.minor }}
+      revision: ${{ github.sha }}
+      image: ${{ steps.ver.outputs.image }}
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: jar
+          path: build/libs/
+
+      - name: Derive version and image name
+        id: ver
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          version="$(scripts/next-version.sh)"
+          {
+            echo "version=${version}"
+            echo "minor=${version%.*}"
+            # GHCR rejects uppercase paths; GitHub owners may have them.
+            echo "image=ghcr.io/${REPO,,}"
+          } >> "$GITHUB_OUTPUT"
+          echo "next release: v${version}"
+
+      # Multi-arch without emulating the compiler: the jar is portable, only the JRE layer differs per platform.
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ steps.ver.outputs.image }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ steps.ver.outputs.version }},enable={{is_default_branch}}
+            type=raw,value=${{ steps.ver.outputs.minor }},enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.version=${{ steps.ver.outputs.version }}
+
+      - name: Build and push
+        id: push
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          build-args: |
+            APP_VERSION=${{ steps.ver.outputs.version }}
+            APP_REVISION=${{ github.sha }}
+          # Pull requests validate the Dockerfile without publishing anything.
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+
+  release:
+    name: Tag and release
+    needs: image
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      # Credentials stay: this job pushes the release tag with the job's own contents:write token.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 # zizmor: ignore[artipacked]
+        with:
+          fetch-depth: 0
+
+      - name: Push tag
+        env:
+          VERSION: ${{ needs.image.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "v${VERSION}" -m "Release v${VERSION}"
+          git push origin "v${VERSION}"
+
+      - name: Previous release tag
+        id: prev
+        run: |
+          prev="$(git tag -l 'v[0-9]*' --sort=-v:refname | sed -n '2p')"
+          echo "tag=${prev}" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          tag_name: v${{ needs.image.outputs.version }}
+          name: v${{ needs.image.outputs.version }}
+          generate_release_notes: true
+          body: |
+            **Image:** `${{ needs.image.outputs.image }}:${{ needs.image.outputs.version }}`
+            **Digest:** `${{ needs.image.outputs.digest }}`
+            **Revision:** `${{ github.sha }}`
+
+            Watchtower on the VPS picks this up within a minute. To roll back to the previous release, on the VPS:
+
+            ```bash
+            make prod-rollback TAG=${{ steps.prev.outputs.tag != '' && steps.prev.outputs.tag || 'sha-xxxxxxx' }}
+            ```
+            (strip the leading `v`; see docs/deployment.md for when a schema change makes this unsafe)
+
+  # Publication is not deployment. The host pulls on its own schedule, and a stalled Watchtower is the known failure
+  # mode of that design, so the GitHub Deployment is resolved only by observing the host serving the new revision.
+  # Enable by setting the repository variable PRODUCTION_URL (https://your.domain); without it this job skips.
+  deploy:
+    name: Track rollout
+    needs: [image, release]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      deployments: write
+    steps:
+      - name: Is a production host configured?
+        id: cfg
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        run: |
+          if [ -z "${PRODUCTION_URL}" ]; then
+            echo "::notice::PRODUCTION_URL repository variable not set; skipping rollout tracking."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open deployment
+        if: steps.cfg.outputs.configured == 'true'
+        id: deployment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+        with:
+          script: |
+            const { data } = await github.rest.repos.createDeployment({
+              owner: context.repo.owner, repo: context.repo.repo, ref: context.sha,
+              environment: 'production', description: 'Published; waiting for the host to pull it',
+              auto_merge: false, required_contexts: [],
+            });
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner, repo: context.repo.repo, deployment_id: data.id,
+              state: 'in_progress', environment_url: process.env.PRODUCTION_URL,
+            });
+            core.setOutput('id', data.id);
+
+      - name: Wait for every replica to serve the new revision
+        if: steps.cfg.outputs.configured == 'true'
+        id: wait
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          EXPECTED: ${{ github.sha }}
+          TIMEOUT_SECONDS: "900"
+        run: |
+          deadline=$(( $(date +%s) + TIMEOUT_SECONDS ))
+          while [ "$(date +%s)" -lt "$deadline" ]; do
+            ok=true; seen=""
+            # Several samples per round: while a rollout is in flight one replica still answers with the old revision.
+            for _ in 1 2 3 4; do
+              got="$(curl -fsS --max-time 10 "${PRODUCTION_URL%/}/version" | jq -r .revision 2>/dev/null || echo "")"
+              seen="${seen} ${got:-?}"
+              [ "$got" = "$EXPECTED" ] || ok=false
+            done
+            if [ "$ok" = true ]; then echo "host serves ${EXPECTED}"; exit 0; fi
+            echo "waiting; saw:${seen}"
+            sleep 30
+          done
+          echo "::error::host did not report ${EXPECTED} within ${TIMEOUT_SECONDS}s. The image is published; check Watchtower: make prod-logs SERVICE=watchtower"
+          exit 1
+
+      - name: Close deployment
+        if: always() && steps.cfg.outputs.configured == 'true' && steps.deployment.outputs.id != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PRODUCTION_URL: ${{ vars.PRODUCTION_URL }}
+          OUTCOME: ${{ steps.wait.outcome }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.id }}
+        with:
+          script: |
+            const ok = process.env.OUTCOME === 'success';
+            await github.rest.repos.createDeploymentStatus({
+              owner: context.repo.owner, repo: context.repo.repo,
+              deployment_id: Number(process.env.DEPLOYMENT_ID),
+              state: ok ? 'success' : 'failure', environment_url: process.env.PRODUCTION_URL,
+              description: ok ? 'Host is serving this revision' : 'Published, but the host did not pick it up in time',
+            });

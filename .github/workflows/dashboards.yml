@@ -1,0 +1,40 @@
+# Pushes deploy/grafana/** to Grafana Cloud whenever it changes on main, so dashboards deploy the same way code does.
+#
+# Needs repository secrets GRAFANA_URL and GRAFANA_API_TOKEN (service account token: dashboards:write and
+# alert.provisioning:write). Without them the job skips with a notice. Alert rules and the Telegram contact point
+# are pushed only when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID are also set.
+name: dashboards
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "deploy/grafana/**"
+      - "scripts/grafana-push.sh"
+      - ".github/workflows/dashboards.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  push:
+    name: Push dashboards to Grafana Cloud
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Push
+        env:
+          GRAFANA_URL: ${{ secrets.GRAFANA_URL }}
+          GRAFANA_API_TOKEN: ${{ secrets.GRAFANA_API_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [ -z "$GRAFANA_URL" ] || [ -z "$GRAFANA_API_TOKEN" ]; then
+            echo "::notice::GRAFANA_URL / GRAFANA_API_TOKEN secrets not set; dashboards not pushed."
+            exit 0
+          fi
+          scripts/grafana-push.sh cloud
