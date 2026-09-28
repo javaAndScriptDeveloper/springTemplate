@@ -266,5 +266,72 @@
         }
       }
     ]
+  },
+  {
+    "uid": "app-backup-stale",
+    "title": "BackupStale",
+    "ruleGroup": "app-baseline",
+    "folderUID": "app",
+    "orgID": 1,
+    "condition": "C",
+    "for": "15m",
+    "noDataState": "OK",
+    "execErrState": "Error",
+    "labels": {
+      "severity": "critical"
+    },
+    "annotations": {
+      "summary": "No successful off-host backup for over 12 h. On the VPS: `make prod-backup-status`, `make prod-logs SERVICE=backup`."
+    },
+    "data": [
+      {
+        "refId": "A",
+        "relativeTimeRange": {
+          "from": 600,
+          "to": 0
+        },
+        "datasourceUid": "grafanacloud-prom",
+        "model": {
+          "refId": "A",
+          "expr": "time() - max(app_backup_last_success_timestamp_seconds{env=\"prod\"})",
+          "instant": true,
+          "range": false,
+          "intervalMs": 1000,
+          "maxDataPoints": 43200
+        }
+      },
+      {
+        "refId": "B",
+        "datasourceUid": "__expr__",
+        "model": {
+          "refId": "B",
+          "type": "reduce",
+          "expression": "A",
+          "reducer": "last",
+          "settings": {
+            "mode": "dropNN"
+          }
+        }
+      },
+      {
+        "refId": "C",
+        "datasourceUid": "__expr__",
+        "model": {
+          "refId": "C",
+          "type": "threshold",
+          "expression": "B",
+          "conditions": [
+            {
+              "evaluator": {
+                "type": "gt",
+                "params": [
+                  43200
+                ]
+              }
+            }
+          ]
+        }
+      }
+    ]
   }
 ]

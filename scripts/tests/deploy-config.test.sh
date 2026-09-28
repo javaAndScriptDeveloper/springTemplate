@@ -29,6 +29,13 @@ grep -q 'com.centurylinklabs.watchtower.lifecycle.post-update:' <<<"$rendered" |
 # A single 5xx must not eject a replica from Caddy's rotation.
 grep -q 'unhealthy_status' "$root/deploy/Caddyfile" && fail "Caddyfile ejects replicas on 5xx responses"
 
+# Alloy reads the backup sidecar's textfile from the shared volume.
+grep -q 'target: /metrics/backup' <<<"$(docker compose -f "$root/deploy/compose.prod.yml" --env-file "$here/fixtures/env.prod.test" --profile observability config)" \
+  || fail "alloy does not mount the backup metrics volume"
+grep -q 'prometheus.exporter.unix "backup"' "$root/deploy/alloy/config.alloy" || fail "alloy has no backup textfile pipeline"
+docker run --rm -v "$root/deploy/alloy/config.alloy:/c.alloy:ro" grafana/alloy:v1.10.0 fmt /c.alloy >/dev/null \
+  || fail "config.alloy does not parse"
+
 docker run --rm -v "$root/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=example.com -e ACME_EMAIL=ops@example.com \
   caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || fail "Caddyfile does not validate"
 

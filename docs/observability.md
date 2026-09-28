@@ -51,6 +51,12 @@ set; without them dashboards still ship and a notice says alerting was skipped.
 | HighErrorRate | 5xx share > 5 % over 10 m with ≥ 20 requests | 5 m |
 | DbConnectionsPending | `hikaricp_connections_pending > 0` | 5 m |
 | HeapHigh | heap used / max > 90 % | 10 m |
+| BackupStale | no successful off-host backup for 12 h; no data (backups off) stays quiet | 15 m |
+
+BackupStale reads `app_backup_last_success_timestamp_seconds`, which the backup sidecar writes as a textfile that
+Alloy picks up (`deploy/alloy/config.alloy`). Its 12 h threshold must stay ≥ `BACKUP_MAX_AGE_HOURS` and ≥ 2 × the
+`BACKUP_CRON` interval. Runbook: `make prod-backup-status`, then `make prod-logs SERVICE=backup` on the VPS
+(`docs/deployment.md` §6).
 
 Telegram setup: talk to `@BotFather` → `/newbot` → token; add the bot to a chat and read the chat id from
 `https://api.telegram.org/bot<token>/getUpdates`. Service-account token for Grafana Cloud needs

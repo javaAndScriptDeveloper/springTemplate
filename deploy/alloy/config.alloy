@@ -1,4 +1,4 @@
-// Metrics pipeline: scrape the app's /actuator/prometheus and remote-write it out.
+// Metrics pipeline: scrape the app's /actuator/prometheus and the backup sidecar's textfile, and remote-write both out.
 //
 // Push, not pull: the VPS publishes nothing but Caddy, so Grafana Cloud has no route to the compose network. Alloy
 // scrapes locally and writes outbound. The same file runs on a laptop (compose.yml, observability profile), where it
@@ -66,4 +66,22 @@ prometheus.remote_write "out" {
 			password = sys.env("GRAFANA_CLOUD_PROM_TOKEN")
 		}
 	}
+}
+
+// Backup freshness. The backup sidecar (deploy/backup, profile `backup`) writes backup.prom into a volume mounted here
+// read-only. Without the sidecar the directory is empty or missing and nothing is exported, which is what the
+// BackupStale alert's noDataState=OK expects.
+prometheus.exporter.unix "backup" {
+	set_collectors = ["textfile"]
+
+	textfile {
+		directory = "/metrics/backup"
+	}
+}
+
+prometheus.scrape "backup" {
+	targets         = prometheus.exporter.unix.backup.targets
+	job_name        = "backup"
+	scrape_interval = "60s"
+	forward_to      = [prometheus.remote_write.out.receiver]
 }

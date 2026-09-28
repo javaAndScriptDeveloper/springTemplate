@@ -15,16 +15,16 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Guards the committed Grafana assets under {@code deploy/grafana}: they are hand-edited JSON that only fails at
- * push time otherwise. Every query must reference a metric this application actually exports, and every datasource
- * reference must use the shared uid so one file renders both locally and in Grafana Cloud.
+ * push time otherwise. Every query must reference a metric this application (or its backup sidecar) exports, and
+ * every datasource reference must use the shared uid so one file renders both locally and in Grafana Cloud.
  */
 class DashboardJsonTest {
 
     private static final Path GRAFANA_DIR = Path.of("deploy", "grafana");
     private static final String DATASOURCE_UID = "grafanacloud-prom";
     private static final Pattern KNOWN_METRICS = Pattern.compile(
-            "app_build_info|http_server_requests_seconds|jvm_|hikaricp_|logback_events_total|process_|system_cpu|"
-                    + "\\bup\\b|resilience4j_|tomcat_");
+            "app_build_info|app_backup_|http_server_requests_seconds|jvm_|hikaricp_|logback_events_total|process_|"
+                    + "system_cpu|\\bup\\b|resilience4j_|tomcat_");
 
     private final ObjectMapper mapper = new ObjectMapper();
 
@@ -67,6 +67,42 @@ class DashboardJsonTest {
         }
 
         assertThat(offenders).isEmpty();
+    }
+
+    @Test
+    void backupStaleAlertFiresAfterTwelveHoursAndStaysQuietWhenBackupsAreOff() throws IOException {
+        var rules = mapper.readTree(GRAFANA_DIR.resolve("alerting/rules.json").toFile());
+        var stale = element(rules, "title", "BackupStale");
+
+        // No data means the backup profile is off, which is a valid configuration, not an incident.
+        assertThat(stale.path("noDataState").asText()).isEqualTo("OK");
+        assertThat(stale.toString()).contains("app_backup_last_success_timestamp_seconds");
+        var threshold = element(stale.path("data"), "refId", "C")
+                .path("model")
+                .path("conditions")
+                .get(0)
+                .path("evaluator")
+                .path("params")
+                .get(0);
+        assertThat(threshold.asInt()).isEqualTo(43200);
+    }
+
+    @Test
+    void dashboardShowsTheAgeOfTheLastBackup() throws IOException {
+        var dashboard = mapper.readTree(
+                GRAFANA_DIR.resolve("dashboards/app-overview.json").toFile());
+
+        var panel = element(dashboard.path("panels"), "title", "Last successful backup");
+        assertThat(panel.toString()).contains("app_backup_last_success_timestamp_seconds");
+    }
+
+    private static JsonNode element(JsonNode array, String field, String value) {
+        for (var node : array) {
+            if (node.path(field).asText().equals(value)) {
+                return node;
+            }
+        }
+        throw new AssertionError("no element with " + field + "=" + value);
     }
 
     private static List<Path> jsonFiles() throws IOException {
