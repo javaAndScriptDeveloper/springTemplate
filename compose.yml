@@ -90,9 +90,10 @@ services:
       GRAFANA_CLOUD_PROM_URL: http://prometheus:9090/api/v1/write
       GRAFANA_CLOUD_PROM_USER: local
       GRAFANA_CLOUD_PROM_TOKEN: local
-      # The app normally runs on the HOST (`make run`); host-gateway is how a container reaches it on Linux.
-      APP_METRICS_HOST: ${APP_METRICS_HOST:-host.docker.internal}
-      APP_METRICS_PORT: ${APP_METRICS_PORT:-8080}
+      # The app normally runs on the HOST (`make run`); host-gateway is how a container reaches it on Linux, and a
+      # static target is used because /etc/hosts aliases are invisible to DNS discovery (see config.alloy).
+      APP_METRICS_STATIC_TARGET: host.docker.internal:${APP_METRICS_PORT:-8080}
+      APP_METRICS_HOST: alloy
       APP_ENV: local
     extra_hosts:
       - "host.docker.internal:host-gateway"

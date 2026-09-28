@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean observability-up observability-down \
-	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-restore prod-rollback
+	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-restore prod-rollback grafana-push grafana-push-cloud grafana-pull
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
@@ -67,6 +67,15 @@ observability-up: ## Start local Prometheus + Grafana (http://localhost:3000) + 
 
 observability-down: ## Stop the local observability stack
 	docker compose --profile observability down
+
+grafana-push: ## Push deploy/grafana/** to the local Grafana (http://localhost:3000)
+	scripts/grafana-push.sh local
+
+grafana-push-cloud: ## Push deploy/grafana/** to Grafana Cloud (GRAFANA_URL + GRAFANA_API_TOKEN from env or .env)
+	scripts/grafana-push.sh cloud
+
+grafana-pull: ## Export the dashboard from local Grafana back into deploy/grafana/dashboards
+	scripts/grafana-push.sh pull
 
 clean: ## Remove build artifacts
 	./gradlew clean

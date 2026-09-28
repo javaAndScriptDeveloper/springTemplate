@@ -1,0 +1,10 @@
+{
+  "name": "telegram",
+  "type": "telegram",
+  "disableResolveMessage": false,
+  "settings": {
+    "bottoken": "${TELEGRAM_BOT_TOKEN}",
+    "chatid": "${TELEGRAM_CHAT_ID}",
+    "message": "{{ template \"default.message\" . }}"
+  }
+}

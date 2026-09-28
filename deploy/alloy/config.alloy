@@ -1,0 +1,69 @@
+// Metrics pipeline: scrape the app's /actuator/prometheus and remote-write it out.
+//
+// Push, not pull: the VPS publishes nothing but Caddy, so Grafana Cloud has no route to the compose network. Alloy
+// scrapes locally and writes outbound. The same file runs on a laptop (compose.yml, observability profile), where it
+// writes into a throwaway Prometheus, so the config that reaches production is the one exercised locally.
+//
+// Every value comes from the environment; nothing secret is in this file.
+//
+//   APP_METRICS_HOST          compose service name to resolve; Docker's DNS answers with every replica (prod: app)
+//   APP_METRICS_PORT          management port on those replicas (prod: 8081)
+//   APP_METRICS_STATIC_TARGET one fixed host:port instead (local: host.docker.internal:8080, the app on your laptop).
+//                             /etc/hosts aliases are invisible to DNS discovery, hence a static target locally.
+//   APP_ENV                   label stamped on every series (prod | local)
+
+discovery.dns "app" {
+	// Locally this is pointed at Alloy itself, which always resolves, and the relabel rule below drops it.
+	names            = [coalesce(sys.env("APP_METRICS_HOST"), "app")]
+	type             = "A"
+	port             = coalesce(sys.env("APP_METRICS_PORT"), "8081")
+	refresh_interval = "15s"
+}
+
+discovery.relabel "targets" {
+	targets = array.concat(
+		discovery.dns.app.targets,
+		[{__address__ = coalesce(sys.env("APP_METRICS_STATIC_TARGET"), "")}],
+	)
+
+	// Static slot unused (production): drop the empty placeholder.
+	rule {
+		source_labels = ["__address__"]
+		regex         = ""
+		action        = "drop"
+	}
+
+	// Local harness: the DNS name is Alloy's own container, not an app replica.
+	rule {
+		source_labels = ["__meta_dns_name"]
+		regex         = "alloy"
+		action        = "drop"
+	}
+}
+
+prometheus.scrape "app" {
+	targets         = discovery.relabel.targets.output
+	job_name        = "app"
+	metrics_path    = "/actuator/prometheus"
+	scrape_interval = "30s"
+	scrape_timeout  = "10s"
+	forward_to      = [prometheus.remote_write.out.receiver]
+}
+
+prometheus.remote_write "out" {
+	// Labels every series with where it came from, so a laptop run and production never average into each other.
+	external_labels = {
+		env = coalesce(sys.env("APP_ENV"), "local"),
+	}
+
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+		basic_auth {
+			// Grafana Cloud: username is the numeric Prometheus instance id, password an access-policy token with
+			// metrics:write. Locally both are the dummy value "local".
+			username = sys.env("GRAFANA_CLOUD_PROM_USER")
+			password = sys.env("GRAFANA_CLOUD_PROM_TOKEN")
+		}
+	}
+}
