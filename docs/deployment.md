@@ -106,7 +106,18 @@ you choose. A dump on the same disk as the database does not survive losing that
    `make prod-logs SERVICE=backup`.
 5. `make prod-backup-now`, then `make prod-backup-list`: the new stamp must be listed. Look at the remote once too.
 
-Upgrading from the old local backups: once step 5 works, delete `deploy/backups/` by hand.
+Upgrading from the old local backups: once step 5 works, delete `deploy/backups/` by hand. If you do **not** enable
+backups, the old always-on `backup` container keeps running after `make prod-up` (compose does not treat a service
+that moved behind a profile as an orphan); remove it with
+`docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod rm -sf backup`.
+
+### Disable
+
+Remove `backup` from `COMPOSE_PROFILES`, stop the container with
+`docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod rm -sf backup`, then delete its last metric —
+otherwise Alloy keeps exporting the frozen timestamp and `BackupStale` fires forever:
+`docker run --rm -v <COMPOSE_PROJECT_NAME>_backup_metrics:/m alpine rm -f /m/backup.prom` (or stop `alloy` and
+`docker volume rm <COMPOSE_PROJECT_NAME>_backup_metrics`).
 
 ### What is on the remote
 
@@ -149,8 +160,10 @@ To undo a restore, copy the safety dump back into `postgres/` and restore it:
 `docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod --profile backup run --rm --entrypoint rclone backup copyto "$RCLONE_REMOTE/pre-restore/<stamp>.dump" "$RCLONE_REMOTE/postgres/<stamp>.dump"`
 (with `RCLONE_REMOTE` exported in your shell), then `make prod-restore STAMP=<stamp>`.
 
-On a **new host**: `make prod-init`, copy `rclone.conf` and fill `.env.prod` as above, `make prod-up`, then
-`make prod-restore STAMP=latest`.
+On a **new host**: `make prod-init`, copy `rclone.conf` and fill `.env.prod` as above but leave `backup` **out** of
+`COMPOSE_PROFILES`, `make prod-up`, `make prod-backup-list`, `make prod-restore STAMP=<the stamp you want>` (an
+explicit stamp, not `latest`), then add `backup` to `COMPOSE_PROFILES` and `make prod-up` again. A scheduler running
+before the restore could back up the new, empty database and make it `latest` — and start pruning towards it.
 
 ## 7. Memory budget
 
