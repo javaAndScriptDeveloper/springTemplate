@@ -1,4 +1,4 @@
-# Production profile. Activate with SPRING_PROFILES_ACTIVE=prod (set on the `app` container in docker-compose.yml).
+# Production profile. Activate with SPRING_PROFILES_ACTIVE=prod (set on the `app` service in deploy/compose.prod.yml).
 spring:
   datasource:
     hikari:
@@ -18,6 +18,13 @@ management:
   endpoint:
     health:
       show-details: when-authorized
+
+# No API explorer on a public host; the spec is still generated at build time if you need it elsewhere.
+springdoc:
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
 
 logging:
   level:

@@ -1,3 +1,5 @@
+import java.time.Duration
+
 plugins {
     id("java")
     id("jacoco")
@@ -115,6 +117,8 @@ val integrationPattern = "**/integration/**"
 
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    // A hung Docker daemon once stalled a fork for an hour; fail fast instead of burning CI minutes.
+    timeout = Duration.ofMinutes(20)
     systemProperty("junit.jupiter.extensions.autodetection.enabled", true)
     systemProperty("file.encoding", "UTF-8")
     testLogging {
@@ -133,19 +137,20 @@ tasks.test {
 
 // Integration tests: each fork boots its own Spring context and therefore its own Postgres container
 // (see TestcontainersConfiguration), so forks never share a database. Classes inside one fork run sequentially.
-val integrationTest by tasks.registering(Test::class) {
-    description = "Runs Testcontainers-backed tests under src/test/java/**/integration/**."
-    group = "verification"
-    testClassesDirs =
-        sourceSets.test
-            .get()
-            .output.classesDirs
-    classpath = sourceSets.test.get().runtimeClasspath
-    include(integrationPattern)
-    maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
-    maxHeapSize = "1g"
-    shouldRunAfter(tasks.test)
-}
+val integrationTest =
+    tasks.register<Test>("integrationTest") {
+        description = "Runs Testcontainers-backed tests under src/test/java/**/integration/**."
+        group = "verification"
+        testClassesDirs =
+            sourceSets.test
+                .get()
+                .output.classesDirs
+        classpath = sourceSets.test.get().runtimeClasspath
+        include(integrationPattern)
+        maxParallelForks = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
+        maxHeapSize = "1g"
+        shouldRunAfter(tasks.test)
+    }
 
 // Classes with no meaningful branches to cover — excluded from the coverage report and gate.
 val coverageExclusions =

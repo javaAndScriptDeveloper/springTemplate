@@ -1,3 +1,7 @@
 databaseChangeLog:
   - includeAll:
       path: db/changelog/changes
+      # Only changesets: without the filter Liquibase warns about the .gitkeep placeholder on every start,
+      # and a fresh template has no changesets yet, so an empty directory must not be an error.
+      endsWithFilter: .yaml
+      errorIfMissingOrEmpty: false

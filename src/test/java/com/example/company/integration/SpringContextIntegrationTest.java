@@ -1,17 +1,20 @@
 package com.example.company.integration;
 
-import org.junit.jupiter.api.Assertions;
+import static org.assertj.core.api.Assertions.assertThat;
+
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 
-public class SpringContextIntegrationTest extends AbstractIntegrationTest {
+class SpringContextIntegrationTest extends AbstractIntegrationTest {
 
-    @Autowired
-    ApplicationContext applicationContext;
+    private final ApplicationContext applicationContext;
+
+    SpringContextIntegrationTest(ApplicationContext applicationContext) {
+        this.applicationContext = applicationContext;
+    }
 
     @Test
-    void setup() {
-        Assertions.assertNotNull(applicationContext.getApplicationName());
+    void contextLoads() {
+        assertThat(applicationContext.getId()).isNotBlank();
     }
 }
