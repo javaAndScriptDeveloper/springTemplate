@@ -37,6 +37,13 @@ class ObjectStorageServiceTest {
     private final ObjectStorageService service = new ObjectStorageService(s3, presigner, props);
 
     @Test
+    void propertiesToStringDoesNotLeakTheSecretKey() {
+        var secret = new MinioProperties("http://localhost:9000", "k", "s3cr3t-value", "b", "us-east-1");
+
+        assertThat(secret.toString()).doesNotContain("s3cr3t-value").contains("secretKey=****");
+    }
+
+    @Test
     void putUploadsToTheConfiguredBucketWithContentType() {
         service.put("docs/a.txt", "hi".getBytes(), "text/plain");
 

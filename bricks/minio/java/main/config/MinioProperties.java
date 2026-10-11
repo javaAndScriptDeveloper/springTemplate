@@ -14,4 +14,12 @@ public record MinioProperties(
         @DefaultValue("minioadmin") String accessKey,
         @DefaultValue("minioadmin") String secretKey,
         @DefaultValue("app") String bucket,
-        @DefaultValue("us-east-1") String region) {}
+        @DefaultValue("us-east-1") String region) {
+
+    /** The generated record toString would print the secret key into logs. */
+    @Override
+    public String toString() {
+        return "MinioProperties[endpoint=" + endpoint + ", accessKey=" + accessKey + ", secretKey=****, bucket="
+                + bucket + ", region=" + region + "]";
+    }
+}
