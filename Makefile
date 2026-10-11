@@ -8,6 +8,7 @@ ENV_FILE := $(if $(wildcard .env),.env,.env.example)
 APP_NAME := $(shell basename $(CURDIR))
 # Production stack (run these on the VPS). Everything reads deploy/.env.prod, created by `make prod-init`.
 PROD := docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod
+SERVICE ?= app  # Gradle project under services/ that run/dev/lock address
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -16,10 +17,10 @@ setup: ## One-time: install the commit-msg hook that enforces conventional commi
 	@git config core.hooksPath .githooks && echo "git hooks: .githooks (commit-msg enforces conventional commits)"
 
 run: setup ## Run the app (auto-starts the compose DB)
-	./gradlew bootRun
+	./gradlew :$(SERVICE):bootRun
 
 dev: ## Run with a throwaway Testcontainers DB (no docker-compose needed)
-	./gradlew bootTestRun
+	./gradlew :$(SERVICE):bootTestRun
 
 test: setup ## Run unit tests (no Docker needed)
 	./gradlew test
@@ -27,8 +28,8 @@ test: setup ## Run unit tests (no Docker needed)
 itest: ## Run integration tests (Testcontainers; one Postgres per fork)
 	./gradlew integrationTest
 
-lock: ## Refresh gradle.lockfile after changing dependencies
-	./gradlew dependencies --write-locks -q
+lock: ## Refresh services/<service>/gradle.lockfile after changing dependencies
+	./gradlew :$(SERVICE):dependencies --write-locks -q
 
 release-name: ## Print the version the next push to main would release
 	@scripts/next-version.sh
@@ -52,15 +53,15 @@ db-down: ## Stop the local Postgres
 	docker compose stop db
 
 up: ## Build the jar + image and run app + db with $(ENV_FILE)
-	./gradlew bootJar -q
+	./gradlew :$(SERVICE):bootJar -q
 	docker compose --env-file $(ENV_FILE) --profile full up --build -d
 
 down: ## Stop the full stack
 	docker compose --profile full down
 
 image: ## Build the jar and the OCI image (tag: $(APP_NAME))
-	./gradlew bootJar -q
-	docker build -t $(APP_NAME) .
+	./gradlew :$(SERVICE):bootJar -q
+	docker build -f services/$(SERVICE)/Dockerfile -t $(APP_NAME) .
 
 observability-up: ## Start local Prometheus + Grafana (http://localhost:3000) + Alloy
 	docker compose --env-file $(ENV_FILE) --profile observability up -d

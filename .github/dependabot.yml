@@ -4,7 +4,7 @@
 version: 2
 updates:
   - package-ecosystem: gradle
-    directory: /
+    directory: /services/app
     schedule:
       interval: weekly
       day: monday
@@ -31,8 +31,7 @@ updates:
 
   - package-ecosystem: docker
     directories:
-      - /
-      - /deploy/backup
+      - /services/app
     schedule:
       interval: weekly
       day: monday

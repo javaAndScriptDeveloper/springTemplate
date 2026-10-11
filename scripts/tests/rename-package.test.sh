@@ -6,10 +6,17 @@ root="$(cd "$here/../.." && pwd)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
-git -C "$root" archive HEAD | tar -x -C "$tmp"
+# The staged index (not HEAD), so a change under review is what gets exported.
+git -C "$root" archive "$(git -C "$root" write-tree)" | tar -x -C "$tmp"
 # Working-tree versions of the script under test and its inputs, so an uncommitted fix is what gets tested.
 cp "$root/scripts/rename-package.sh" "$tmp/scripts/"
 cp "$root/scripts/tests/rename-package.test.sh" "$tmp/scripts/tests/"
+# Bricks carry __PKG__ placeholders resolved by scripts/brick.sh at add time: rename must leave them alone, while a
+# brick class already copied into the service is moved like any other class.
+mkdir -p "$tmp/bricks/demo/java/main/config"
+printf 'package __PKG__.config;\n\npublic class DemoConfig {}\n' > "$tmp/bricks/demo/java/main/config/DemoConfig.java"
+printf 'package com.example.company.config;\n\npublic class CopiedBrickConfig {}\n' \
+  > "$tmp/services/app/src/main/java/com/example/company/config/CopiedBrickConfig.java"
 git -C "$tmp" init -q -b main; git -C "$tmp" -c user.email=t@t -c user.name=t add -A >/dev/null
 git -C "$tmp" -c user.email=t@t -c user.name=t commit -q -m "chore: snapshot"
 
@@ -20,17 +27,19 @@ rm "$tmp/dirty.txt"
 
 (cd "$tmp" && scripts/rename-package.sh com.acme.shop shop >/dev/null)
 
-[[ -f "$tmp/src/main/java/com/acme/shop/Application.java" ]] || fail "main sources not moved"
-[[ -f "$tmp/src/test/java/com/acme/shop/TestcontainersConfiguration.java" ]] || fail "test sources not moved"
-[[ ! -d "$tmp/src/main/java/com/example" ]] || fail "old package directory left behind"
-grep -q '^package com.acme.shop;' "$tmp/src/main/java/com/acme/shop/Application.java" || fail "package line not rewritten"
-if grep -rq "com.example.company" "$tmp/src" "$tmp/build.gradle.kts" "$tmp/compose.yml" "$tmp/.env.example" "$tmp/CLAUDE.md" 2>/dev/null; then
-  fail "old package name still referenced: $(grep -rl 'com.example.company' "$tmp/src" "$tmp/build.gradle.kts" "$tmp/compose.yml" "$tmp/.env.example" | head -3)"
+[[ -f "$tmp/services/app/src/main/java/com/acme/shop/Application.java" ]] || fail "main sources not moved"
+[[ -f "$tmp/services/app/src/test/java/com/acme/shop/TestcontainersConfiguration.java" ]] || fail "test sources not moved"
+[[ ! -d "$tmp/services/app/src/main/java/com/example" ]] || fail "old package directory left behind"
+grep -q '^package com.acme.shop;' "$tmp/services/app/src/main/java/com/acme/shop/Application.java" || fail "package line not rewritten"
+if grep -rq "com.example.company" "$tmp/services/app/src" "$tmp/services/app/build.gradle.kts" "$tmp/compose.yml" "$tmp/.env.example" "$tmp/CLAUDE.md" 2>/dev/null; then
+  fail "old package name still referenced: $(grep -rl 'com.example.company' "$tmp/services/app/src" "$tmp/services/app/build.gradle.kts" "$tmp/compose.yml" "$tmp/.env.example" | head -3)"
 fi
 grep -q 'rootProject.name = "shop"' "$tmp/settings.gradle.kts" || fail "rootProject.name not set"
 grep -q '^APP_NAME=shop$' "$tmp/.env.example" || fail "APP_NAME not set in .env.example"
-grep -q 'group = "com.acme.shop"' "$tmp/build.gradle.kts" || fail "gradle group not set"
-grep -q 'com/acme/shop/Application.class' "$tmp/build.gradle.kts" || fail "coverage exclusions not rewritten"
+grep -q 'group = "com.acme.shop"' "$tmp/services/app/build.gradle.kts" || fail "gradle group not set"
+grep -q 'com/acme/shop/Application.class' "$tmp/services/app/build.gradle.kts" || fail "coverage exclusions not rewritten"
+[[ -f "$tmp/services/app/src/main/java/com/acme/shop/config/CopiedBrickConfig.java" ]] || fail "copied brick class not moved"
+grep -q '^package __PKG__.config;' "$tmp/bricks/demo/java/main/config/DemoConfig.java" || fail "rename touched bricks/"
 
 # The script's own tests and the historical design docs keep the old name; rewriting them breaks CI after a rename.
 untouched="$(git -C "$tmp" status --porcelain -- scripts/tests docs/superpowers)"

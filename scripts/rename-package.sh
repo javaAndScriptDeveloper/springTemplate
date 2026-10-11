@@ -4,9 +4,9 @@
 #   scripts/rename-package.sh <new.base.package> <app-name>
 #   e.g.   scripts/rename-package.sh com.acme.shop shop
 #
-# Rewrites: package/import lines and package-literal strings (Feign/ArchUnit/JaCoCo), Gradle group and project name,
-# APP_NAME defaults in application.yml, compose.yml and .env.example, and CLAUDE.md. Refuses on a dirty git tree so
-# the result is one reviewable diff. Afterwards: make build.
+# Rewrites (service code in services/app; bricks/ is left alone): package/import lines and package-literal strings
+# (Feign/ArchUnit/JaCoCo), Gradle group and project name, APP_NAME defaults in application.yml, compose.yml and
+# .env.example, and CLAUDE.md. Refuses on a dirty git tree so the result is one reviewable diff. Afterwards: make build.
 set -euo pipefail
 
 new_pkg="${1:-}"; app="${2:-}"
@@ -26,7 +26,7 @@ old_dir="${old_pkg//./\/}"; new_dir="${new_pkg//./\/}"
 # Literal dots for sed: otherwise "com.example.company" also matches the slashed form and mangles it.
 old_pkg_re="${old_pkg//./\\.}"
 
-for src in src/main/java src/test/java; do
+for src in services/app/src/main/java services/app/src/test/java; do
   [[ -d "$src/$old_dir" ]] || continue
   mkdir -p "$src/$new_dir"
   # Move contents (not the directory) so a new package that shares a prefix with the old one still works.
@@ -37,13 +37,13 @@ done
 
 # Package references: dotted (Java, YAML, Gradle strings) and slashed (JaCoCo exclusions). The script's own tests
 # and the historical design docs keep the template's name on purpose.
-{ grep -rl --exclude-dir=.git --exclude-dir=build --exclude-dir=.gradle --exclude-dir=superpowers \
+{ grep -rl --exclude-dir=.git --exclude-dir=build --exclude-dir=.gradle --exclude-dir=superpowers --exclude-dir=bricks \
     --exclude-dir=tests --exclude="$(basename "$0")" -e "$old_pkg" -e "$old_dir" . || true; } \
   | xargs -r sed -i -e "s#${old_pkg_re}#${new_pkg}#g" -e "s#${old_dir}#${new_dir}#g"
 
 # Application name: Gradle project, env defaults, docs.
 sed -i "s#rootProject.name = \"${old_name}\"#rootProject.name = \"${app}\"#" settings.gradle.kts
-sed -i -E "s#(APP_NAME:-?)${old_name}#\1${app}#g" compose.yml src/main/resources/application.yml
+sed -i -E "s#(APP_NAME:-?)${old_name}#\1${app}#g" compose.yml services/app/src/main/resources/application.yml
 sed -i "s#^APP_NAME=${old_name}\$#APP_NAME=${app}#" .env.example
 [[ -f CLAUDE.md ]] && sed -i "s#${old_name}#${app}#g" CLAUDE.md
 [[ -f README.md ]] && sed -i "s#${old_name}#${app}#g" README.md

@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
  */
 class DashboardJsonTest {
 
-    private static final Path GRAFANA_DIR = Path.of("deploy", "grafana");
+    private static final Path GRAFANA_DIR = Path.of(System.getProperty("repo.root", "."), "deploy", "grafana");
     private static final String DATASOURCE_UID = "grafanacloud-prom";
     private static final Pattern KNOWN_METRICS = Pattern.compile(
             "app_build_info|app_backup_|http_server_requests_seconds|jvm_|hikaricp_|logback_events_total|process_|"

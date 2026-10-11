@@ -53,7 +53,7 @@ Grafana Cloud on merge. `DashboardJsonTest` guards it. Alerts ship only when Tel
 
 ## Conventions
 
-- Layers: `controller` → `service` → `repository`; `job` (schedulers, `*Scheduler`) may call services. Enforced by
+- Service code lives under `services/app` (Gradle project `:app`; `make run`/`dev`/`lock` take `SERVICE=`). Layers: `controller` → `service` → `repository`; `job` (schedulers, `*Scheduler`) may call services. Enforced by
   `ArchitectureTest`, including constructor injection only, no `System.out`, `@Scheduled` only under `job`.
 - Liquibase owns the schema (`db/changelog/changes/*.yaml`, `includeAll`); Hibernate validates. Boot 4 needs
   `spring-boot-liquibase` on the classpath or nothing runs — it is there, do not remove it.

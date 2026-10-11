@@ -106,8 +106,8 @@ Edit it in the local Grafana, `make grafana-pull`, commit; CI pushes it to Grafa
 
 ## Testing
 
-- `src/test/java/**/unit/**` and everything outside `integration/`: no Docker, classes run concurrently.
-- `src/test/java/**/integration/**`: extend `AbstractIntegrationTest`; each Gradle fork boots its own context and
+- `services/app/src/test/java/**/unit/**` and everything outside `integration/`: no Docker, classes run concurrently.
+- `services/app/src/test/java/**/integration/**`: extend `AbstractIntegrationTest`; each Gradle fork boots its own context and
   its own Postgres container, so forks never share a database.
 - Test data with Instancio (`support.Fixtures`); architecture rules in `ArchitectureTest`; `DashboardJsonTest` keeps
   the Grafana JSON honest; `scripts/tests/*.test.sh` cover the bash tooling (`make test-scripts`).
@@ -119,7 +119,7 @@ make rename PKG=com.acme.shop APP=shop   # moves the package, renames the app, o
 make build
 ```
 
-Then add the first Liquibase changeset under `src/main/resources/db/changelog/changes/` and go.
+Then add the first Liquibase changeset under `services/app/src/main/resources/db/changelog/changes/` and go.
 
 ## Docs
 

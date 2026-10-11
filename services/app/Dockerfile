@@ -17,7 +17,7 @@ RUN apt-get update \
 
 RUN groupadd --system spring && useradd --system --gid spring spring
 WORKDIR /application
-COPY --chown=spring:spring build/libs/app.jar application.jar
+COPY --chown=spring:spring services/app/build/libs/app.jar application.jar
 USER spring:spring
 
 EXPOSE 8080
