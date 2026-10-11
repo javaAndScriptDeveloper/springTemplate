@@ -142,21 +142,35 @@ jobs:
         with:
           cache-read-only: true
 
+      - name: Skip bricks this repository has enabled
+        id: enabled
+        env:
+          BRICK: ${{ matrix.brick }}
+        run: |
+          if grep -qx "$BRICK" .bricks 2>/dev/null; then
+            echo "::notice::brick $BRICK is enabled in this repository; the build job already covers it"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Add the brick
+        if: steps.enabled.outputs.skip != 'true'
         env:
           BRICK: ${{ matrix.brick }}
         run: scripts/brick.sh add "$BRICK"
 
       - name: Build with the brick
+        if: steps.enabled.outputs.skip != 'true'
         run: ./gradlew build --no-daemon
 
       - name: Script tests and compose render with the brick
+        if: steps.enabled.outputs.skip != 'true'
         run: |
           scripts/tests/run.sh
           docker compose --env-file .env.example --profile full --profile observability config -q
           docker compose -f deploy/compose.prod.yml --env-file scripts/tests/fixtures/env.prod.test config -q
 
       - name: Remove the brick and prove nothing is left
+        if: steps.enabled.outputs.skip != 'true'
         env:
           BRICK: ${{ matrix.brick }}
         run: |
