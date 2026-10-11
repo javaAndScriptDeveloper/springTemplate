@@ -101,6 +101,19 @@ dependencies {
     }
 }
 
+// Bricks (bricks/README.md): each enabled brick may contribute dependencies through bricks/<name>/brick.gradle.kts.
+rootProject
+    .file(".bricks")
+    .takeIf { it.isFile }
+    ?.readLines()
+    ?.map { it.substringBefore('#').trim() }
+    ?.filter { it.isNotEmpty() }
+    ?.forEach { brick ->
+        val dir = rootProject.file("bricks/$brick")
+        require(dir.isDirectory) { "brick '$brick' is listed in .bricks but bricks/$brick does not exist" }
+        File(dir, "brick.gradle.kts").takeIf { it.isFile }?.let { apply(from = it) }
+    }
+
 dependencyManagement {
     imports {
         mavenBom("org.springframework.cloud:spring-cloud-dependencies:${property("springCloudVersion")}")

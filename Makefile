@@ -1,6 +1,6 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean observability-up observability-down \
-	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-backup-status prod-backup-list prod-restore prod-rollback grafana-push grafana-push-cloud grafana-pull vps-ssh vps-ps vps-logs vps-status vps-backup-status vps-psql vps-datagrip rename
+	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-backup-now prod-backup-status prod-backup-list prod-restore prod-rollback grafana-push grafana-push-cloud grafana-pull vps-ssh vps-ps vps-logs vps-status vps-backup-status vps-psql vps-datagrip rename bricks add remove
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
@@ -8,10 +8,14 @@ ENV_FILE := $(if $(wildcard .env),.env,.env.example)
 APP_NAME := $(shell basename $(CURDIR))
 # Production stack (run these on the VPS). Everything reads deploy/.env.prod, created by `make prod-init`.
 PROD := docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod
-SERVICE ?= app  # Gradle project under services/ that run/dev/lock address
+# Enabled bricks (bricks/README.md): names from .bricks, comments and blanks dropped. Each enabled brick's Makefile
+# is included at the bottom of this file, so its targets show up in `make help`.
+BRICKS ?= $(shell sed -e 's/\#.*//' -e '/^[[:space:]]*$$/d' .bricks 2>/dev/null)
+# Gradle project under services/ that run/dev/lock address.
+SERVICE ?= app
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
+	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 setup: ## One-time: install the commit-msg hook that enforces conventional commits
 	@git config core.hooksPath .githooks && echo "git hooks: .githooks (commit-msg enforces conventional commits)"
@@ -80,6 +84,19 @@ grafana-pull: ## Export the dashboard from local Grafana back into deploy/grafan
 
 clean: ## Remove build artifacts
 	./gradlew clean
+
+# ------------------------------------------------------------------------------------------------------------ bricks
+
+bricks: ## List bricks and whether each is enabled (.bricks)
+	@scripts/brick.sh list
+
+add: ## Enable a brick: make add BRICK=minio
+	@test -n "$(BRICK)" || (echo "usage: make add BRICK=<name>   (make bricks lists them)" && exit 1)
+	scripts/brick.sh add $(BRICK)
+
+remove: ## Disable a brick and delete what it added: make remove BRICK=minio
+	@test -n "$(BRICK)" || (echo "usage: make remove BRICK=<name>" && exit 1)
+	scripts/brick.sh remove $(BRICK)
 
 # ------------------------------------------------------------------------------------------- production, from this machine
 
@@ -167,3 +184,6 @@ prod-rollback: ## Pin the app to an earlier image: make prod-rollback TAG=1.4.1 
 	$(PROD) up -d --force-recreate app
 	@echo "Pinned to $(TAG). Watchtower is stopped; when ready to follow releases again:"
 	@echo "  sed -i 's/^APP_IMAGE_TAG=.*/APP_IMAGE_TAG=latest/' deploy/.env.prod && $(PROD) up -d app watchtower"
+
+# Brick make targets (one Makefile per enabled brick; they may use PROD, ENV_FILE and SERVICE).
+-include $(foreach b,$(BRICKS),bricks/$(b)/Makefile)
