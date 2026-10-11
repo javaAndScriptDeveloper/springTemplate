@@ -18,8 +18,9 @@ Backups are **off until you configure them** and never stay on the VPS. The `bac
    `scp ~/.config/rclone/rclone.conf <vps>:<repo>/bricks/backup/rclone/rclone.conf && ssh <vps> chmod 600 <repo>/bricks/backup/rclone/rclone.conf`.
    The container mounts the directory, not the file: rclone saves refreshed tokens by renaming a new file over
    `rclone.conf`, which a single-file mount rejects.
-3. `make add BRICK=backup` (on the VPS checkout; it appends the brick's variables to `deploy/.env.prod.example`), and in
-   `deploy/.env.prod` set `RCLONE_REMOTE=gdrive:<service-name>`. Optional: `BACKUP_CRON`, `BACKUP_TZ`, `BACKUP_RETENTION_DAYS` (30),
+3. On your laptop: `make add BRICK=backup`, commit, push. On the VPS: `git pull`, copy the brick's block from
+   `deploy/.env.prod.example` into `deploy/.env.prod` and set `RCLONE_REMOTE=gdrive:<service-name>`
+   ([rollout](../../docs/deployment.md)). Optional: `BACKUP_CRON`, `BACKUP_TZ`, `BACKUP_RETENTION_DAYS` (30),
    `BACKUP_MAX_AGE_HOURS` (12).
 4. `make prod-up`. If the remote or Postgres is unreachable the container exits with the reason:
    `make prod-logs SERVICE=backup`.
@@ -29,7 +30,8 @@ Upgrading from the old local backups: once step 5 works, delete `deploy/backups/
 
 ## Disable
 
-`make remove BRICK=backup`, then `make prod-up` (it passes `--remove-orphans`, which stops the container), then delete
+`make remove BRICK=backup`, commit, push; on the VPS `git pull`, then `make prod-up` (it passes
+`--remove-orphans`, which stops the container), then delete
 its last metric —
 otherwise Alloy keeps exporting the frozen timestamp and `BackupStale` fires forever:
 `docker run --rm -v <COMPOSE_PROJECT_NAME>_backup_metrics:/m alpine rm -f /m/backup.prom` (or stop `alloy` and
@@ -76,7 +78,8 @@ To undo a restore, copy the safety dump back into `postgres/` and restore it:
 `docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod run --rm --entrypoint rclone backup copyto "$RCLONE_REMOTE/pre-restore/<stamp>.dump" "$RCLONE_REMOTE/postgres/<stamp>.dump"`
 (with `RCLONE_REMOTE` exported in your shell), then `make prod-restore STAMP=<stamp>`.
 
-On a **new host**: `make prod-init`, `make add BRICK=backup`, copy `rclone.conf` and fill `.env.prod` as above, then start
+On a **new host** (backup already enabled in the repository): `make prod-init`, copy `rclone.conf` and fill `.env.prod`
+as above, then start
 everything **except** the scheduler: `docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod up -d db app
 caddy`. Then `make prod-backup-list`, `make prod-restore STAMP=<the stamp you want>` (an explicit stamp, not `latest`),
 and finally `make prod-up`. A scheduler running before the restore could back up the new, empty database and make it

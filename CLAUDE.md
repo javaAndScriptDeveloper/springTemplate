@@ -29,7 +29,8 @@ The tree is clean at `HEAD` (build, tests, Spotless): any failure after your cha
 - **Push to `main` = deploy.** `ci.yml` builds and tests, packages `ghcr.io/<owner>/<repo>:{latest,X.Y.Z,X.Y,sha-…}`,
   tags `vX.Y.Z`, publishes a GitHub Release, and waits until `${PRODUCTION_URL}/version` reports the new revision
   from every replica. Watchtower on the VPS pulls `latest` within 60 s and restarts replicas one at a time.
-  Push → live ≈ 5–6 min. Nobody ever SSHes to deploy.
+  Push → live ≈ 5–6 min. Nobody SSHes for app releases; enabling a brick or changing
+  compose needs `git pull && make prod-up` on the host (`docs/deployment.md`).
 - Rollback on the VPS: `make prod-rollback TAG=<previous version>`. Schema is not rolled back: changesets must work
   with the previous release (expand/contract; `docs/deployment.md` §5).
 - `MANAGEMENT_PORT=8081` in prod: actuator is never published or proxied. `/version` is the only public build info.

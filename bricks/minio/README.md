@@ -2,7 +2,12 @@
 
 `make add BRICK=minio` → `make run` starts MinIO beside Postgres (console http://localhost:9001, minioadmin /
 minioadmin). In prod: `make prod-init` (or add `MINIO_ROOT_PASSWORD=` by hand and generate one with
-`openssl rand -hex 24`), `make prod-up`. Memory: 256m.
+`openssl rand -hex 24`), `make prod-up`. Memory: 256m. The app uses the MinIO root credentials (fine for a solo
+project; create a scoped user with `mc admin user add` if you need least privilege).
+
+Enabling on a running host: do the VPS steps (`git pull`, `.env.prod` block, `make prod-up`) right after the push
+([deployment.md](../../docs/deployment.md)). If the new image rolls out first, `APP_MINIO_ENDPOINT` falls back to
+`localhost:9000`, `minio` health is DOWN, replicas go unhealthy and uploads fail until the host catches up.
 
 ## Use it
 `ObjectStorageService` (`service/`): `put(key, bytes, contentType)`, `get(key)` → 404 `ApplicationException` when
@@ -27,7 +32,8 @@ Unit: `ObjectStorageServiceTest` (mocked `S3Client`). Integration: `ObjectStorag
 Testcontainers MinIO (`@Import(MinioTestcontainersConfiguration.class)`).
 
 ## Change it
-Dependencies: `brick.gradle.kts` (bump the AWS SDK by hand; Dependabot does not read brick files).
+Dependencies: `brick.gradle.kts` (bump the AWS SDK by hand; Dependabot does not read brick files). A second
+module using awssdk should move both to the AWS SDK BOM.
 
 Image: MinIO Inc. stopped publishing community images (`minio/minio` is no longer pullable), so the brick uses
 Chainguard's build, `cgr.dev/chainguard/minio:latest`. Only `latest` exists on the free tier; to get reproducible

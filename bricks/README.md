@@ -16,9 +16,9 @@ wires it in, `make remove BRICK=<name>` takes it out without residue, `make bric
 |---|---|
 | `README.md` (required) | Nothing. First line `# <name>: <one line>` is what `make bricks` prints. Sections: Use it, Operate it, Invariants, Tests, Change it. |
 | `compose.yml` | `include:` entry in root `compose.yml` (`# brick:<name>` marker). Paths inside are relative to the brick folder. |
-| `compose.prod.yml` | `include:` entry in `deploy/compose.prod.yml`. |
+| `compose.prod.yml` | `include:` entry in `deploy/compose.prod.yml`. Reaches a running host only via `git pull`, the `.env.prod` block and `make prod-up` ([deployment.md](../docs/deployment.md)); brick Java must boot and degrade when its service is absent (minio does; only its health flips). |
 | `env.example` / `env.prod.example` | Block appended to `.env.example` / `deploy/.env.prod.example` between `# --- brick:<name> ---` and `# --- /brick:<name> ---`. An empty `X_PASSWORD=` line is filled by `make prod-init`. |
-| `Makefile` | Included by the root Makefile while enabled (nothing is copied). Start with `# --- brick: <name>`; use `##` help comments; may use `PROD`, `ENV_FILE`, `SERVICE`. |
+| `Makefile` | Included by the root Makefile while enabled (nothing is copied). Convention: start with `# --- brick: <name>`; use `##` help comments; may use `PROD`, `ENV_FILE`, `SERVICE`. |
 | `brick.gradle.kts` | Applied to the service build while enabled; `add`/`remove` refresh `services/app/gradle.lockfile`. Use `"implementation"("…")` (string-invoked; no type-safe accessors). |
 | `java/main/**`, `java/test/**` | Copied under `services/app/src/{main,test}/java/<package>/…`; `__PKG__` → the service package. Spotless runs on add when the brick has `java/`. |
 | `resources/main/**`, `resources/test/**` | Copied under `services/app/src/{main,test}/resources/`. |
@@ -26,7 +26,8 @@ wires it in, `make remove BRICK=<name>` takes it out without residue, `make bric
 | `tests/*.test.sh` | Run by `make test-scripts` always. Test the brick's own scripts in isolation (`BRICKS=<name>` on make). |
 | anything else | Stays put; reference it from the brick's compose files by relative path. |
 
-`scripts/brick.sh` is the source of truth; `add` is idempotent and never commits.
+`scripts/brick.sh` is the source of truth; `add` is idempotent and never commits. It manages one form only: a
+block-sequence `include:` with two-space `  - ` entries in the root compose files.
 
 ## Rules
 
@@ -45,8 +46,8 @@ wires it in, `make remove BRICK=<name>` takes it out without residue, `make bric
 ## Authoring checklist
 
 1. `mkdir bricks/<name>`; write `README.md` first (what, why, how, env, memory, invariants).
-2. Compose fragments; `docker compose -f bricks/<name>/compose.prod.yml config` must not be needed — the all-bricks
-   render in `scripts/tests/deploy-config.test.sh` validates it; extend that test's service list.
+2. Compose fragments; `scripts/tests/deploy-config.test.sh` renders all bricks together, so add your prod services to
+   its service lists.
 3. Env blocks, Makefile, Gradle, Java with `__PKG__`, skill, tests.
 4. Add the name to the `bricks` matrix in `.github/workflows/ci.yml` (`scripts/tests/brick.test.sh` checks this).
 5. `make add BRICK=<name> && make build && make test-scripts && make remove BRICK=<name> && git status --porcelain`

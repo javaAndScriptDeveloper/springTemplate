@@ -41,6 +41,7 @@ One VPS (Hetzner CX or CAX both work: images are amd64 + arm64), Docker installe
 | VPS `deploy/.env.prod` | `DOMAIN`, `ACME_EMAIL` (`POSTGRES_PASSWORD`, `APP_IMAGE`, `COMPOSE_PROJECT_NAME` are generated) | TLS, database, which image Watchtower follows |
 | Bricks | `make add BRICK=observability\|backup\|minio`, then that brick's README | Metrics + alerts, off-host backups, object storage |
 | GitHub → Packages | GHCR package **public**, or `docker login ghcr.io` on the VPS and set `DOCKER_CONFIG_FILE` | Watchtower must be able to pull |
+| GitHub → Secrets (optional) | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` | Weekly security-scan failures notify you; the observability brick also uses them for alerts |
 | GitHub → Variables | `PRODUCTION_URL=https://your.domain` | CI waits for the VPS to serve the new revision and records a Deployment |
 | Local `.env` (optional) | `VPS_SSH=user@host` | `make vps-*` from your machine |
 

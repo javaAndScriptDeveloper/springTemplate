@@ -19,7 +19,7 @@ the rule that makes rolling deploys safe.
 git clone https://github.com/<owner>/<repo>.git && cd <repo>
 make prod-init           # deploy/.env.prod, mode 600, generated POSTGRES_PASSWORD
 $EDITOR deploy/.env.prod # DOMAIN, ACME_EMAIL (+ the env of any enabled brick)
-make prod-up             # (+ enabled bricks) `compose config -q` first: every :? guard fires here, not after the stack is down
+make prod-up             # `compose config -q` first: every :? guard fires here, not after the stack is down (+ bricks)
 make prod-ps
 ```
 
@@ -85,6 +85,29 @@ Liquibase's `DATABASECHANGELOGLOCK` serialises the two replicas at boot, so a mi
 
 Off-host database backups are the `backup` brick: setup, status, restore and the invariants are in
 [`bricks/backup/README.md`](../bricks/backup/README.md). Without the brick there are no backups.
+
+### Adding or removing a brick on a running host
+
+`make add BRICK=<name>` on your laptop, commit, push. On the VPS **right after the push**: `git pull`, copy the
+brick's block from `deploy/.env.prod.example` into `deploy/.env.prod` (generate any password with
+`openssl rand -hex 24`), `make prod-up`. Do the VPS steps right after the push: the old image tolerates the new env, and
+the new image then rolls into a host that already has the brick. Otherwise Watchtower rolls the new image (about 5
+minutes after the push) onto a host without the brick's services; a brick with Java then falls back to its defaults
+(minio: `localhost:9000`), its health indicator reports DOWN and both replicas go unhealthy while `/version` still
+answers. Never run `make add` on the VPS: it edits tracked files and runs Gradle. Removing: `make remove`, commit,
+push, then `git pull` and `make prod-up` (it passes `--remove-orphans`) on the VPS; the brick's README lists leftovers.
+
+### Upgrading a host from the COMPOSE_PROFILES layout
+
+Hosts set up before bricks have `COMPOSE_PROFILES=backup,observability` and `RCLONE_CONFIG_DIR=./backup/rclone` in
+`deploy/.env.prod`; `make prod-up --remove-orphans` on the new layout would remove `backup` and `alloy`, stopping
+backups and the `BackupStale` alert with them. Migrate first:
+
+1. On the laptop: `make add BRICK=backup` and `make add BRICK=observability` (those you used), commit, push.
+2. On the VPS: `git pull`.
+3. `mv deploy/backup/rclone/rclone.conf bricks/backup/rclone/`
+4. In `deploy/.env.prod`: set `RCLONE_CONFIG_DIR=./rclone`, delete the `COMPOSE_PROFILES` line.
+5. `make prod-up`, then `make prod-backup-now`.
 
 ## 7. Memory budget
 
