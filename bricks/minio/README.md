@@ -10,13 +10,14 @@ missing, `delete(key)`, `presignedGetUrl(key, ttl)`. One bucket (`APP_MINIO_BUCK
 keys per feature. Settings: `MinioProperties`, env `APP_MINIO_ENDPOINT / ACCESS_KEY / SECRET_KEY / BUCKET / REGION`.
 
 ## Operate it
-- `/actuator/health` → `minio` component; DOWN when the endpoint is unreachable. Replicas wait for a healthy MinIO
+- `/actuator/health` → `minio` component: a `HEAD` on the configured bucket (no list permission needed, so
+  bucket-scoped keys work); UP while the bucket is not yet created, DOWN when the endpoint is unreachable or refuses. Replicas wait for a healthy MinIO
   at boot (`depends_on`), and a MinIO outage later shows as app DOWN by design: the app cannot do its job.
 - Data lives in the `minio_data` volume; it is **not** in the backup brick's dump. Back it up with `rclone` from the
   volume or switch to a managed store.
 - Presigned URLs embed `APP_MINIO_ENDPOINT` (`http://minio:9000` in prod): fine for server-side fetches, not for
-  browsers. To serve objects publicly add a Caddy site for MinIO, set `APP_MINIO_ENDPOINT` to that public URL and
-  keep the app on the private one through a second property if needed — not provided here.
+  browsers: the app signs with `APP_MINIO_ENDPOINT`. If browsers must fetch, put MinIO behind a Caddy site and set
+  that public URL as the endpoint.
 - Swap to Hetzner Object Storage / AWS: set `APP_MINIO_ENDPOINT`, `APP_MINIO_ACCESS_KEY`, `APP_MINIO_SECRET_KEY`,
   `APP_MINIO_REGION` in `deploy/.env.prod`, delete the `minio` service and the `app` partial from
   `bricks/minio/compose.prod.yml` (or remove the brick and keep the Java).

@@ -10,14 +10,20 @@ import static org.mockito.Mockito.when;
 import __PKG__.config.MinioProperties;
 import __PKG__.exception.ApplicationException;
 import __PKG__.service.ObjectStorageService;
+import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.ArgumentMatchers;
 import org.springframework.http.HttpStatus;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException;
+import software.amazon.awssdk.services.s3.model.CreateBucketRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
@@ -60,5 +66,28 @@ class ObjectStorageServiceTest {
                 .hasMessageContaining("nope")
                 .extracting("status")
                 .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void getFromAMissingBucketIsA404() {
+        when(s3.getObjectAsBytes(any(GetObjectRequest.class)))
+                .thenThrow(NoSuchBucketException.builder().build());
+
+        assertThatThrownBy(() -> service.get("x"))
+                .isInstanceOf(ApplicationException.class)
+                .extracting("status")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void putSurvivesAReplicaCreatingTheBucketFirst() {
+        when(s3.headBucket(ArgumentMatchers.<Consumer<HeadBucketRequest.Builder>>any()))
+                .thenThrow(NoSuchBucketException.builder().build());
+        when(s3.createBucket(ArgumentMatchers.<Consumer<CreateBucketRequest.Builder>>any()))
+                .thenThrow(BucketAlreadyOwnedByYouException.builder().build());
+
+        service.put("a", "hi".getBytes(), "text/plain");
+
+        verify(s3).putObject(any(PutObjectRequest.class), any(RequestBody.class));
     }
 }

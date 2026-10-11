@@ -10,6 +10,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketAlreadyExistsException;
+import software.amazon.awssdk.services.s3.model.BucketAlreadyOwnedByYouException;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
@@ -17,7 +19,10 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.presigner.S3Presigner;
 import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
 
-/** Put, get, delete and presign objects in the configured bucket (minio brick). Creates the bucket on first use. */
+/**
+ * Put, get, delete and presign objects in the configured bucket (minio brick). Creates the bucket on first use; a
+ * missing key or bucket reads as 404, and delete is idempotent.
+ */
 @Service
 @RequiredArgsConstructor
 @Slf4j
@@ -42,13 +47,17 @@ public class ObjectStorageService {
         var request = GetObjectRequest.builder().bucket(props.bucket()).key(key).build();
         try {
             return s3.getObjectAsBytes(request).asByteArray();
-        } catch (NoSuchKeyException e) {
+        } catch (NoSuchKeyException | NoSuchBucketException e) {
             throw new ApplicationException(HttpStatus.NOT_FOUND, "object not found: " + key, e);
         }
     }
 
     public void delete(String key) {
-        s3.deleteObject(b -> b.bucket(props.bucket()).key(key));
+        try {
+            s3.deleteObject(b -> b.bucket(props.bucket()).key(key));
+        } catch (NoSuchBucketException e) {
+            log.debug("nothing to delete: bucket {} does not exist", props.bucket());
+        }
     }
 
     public URL presignedGetUrl(String key, Duration ttl) {
@@ -68,7 +77,11 @@ public class ObjectStorageService {
             s3.headBucket(b -> b.bucket(props.bucket()));
         } catch (NoSuchBucketException e) {
             log.info("creating bucket {}", props.bucket());
-            s3.createBucket(b -> b.bucket(props.bucket()));
+            try {
+                s3.createBucket(b -> b.bucket(props.bucket()));
+            } catch (BucketAlreadyOwnedByYouException | BucketAlreadyExistsException race) {
+                log.debug("bucket {} created concurrently", props.bucket());
+            }
         }
         bucketChecked = true;
     }

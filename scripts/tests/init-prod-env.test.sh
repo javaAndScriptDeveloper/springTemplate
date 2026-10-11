@@ -8,7 +8,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 repo="$tmp/repo"; mkdir -p "$repo/deploy" "$repo/scripts"
 cp "$root/deploy/.env.prod.example" "$repo/deploy/"
-printf '\n# --- brick:minio ---\nMINIO_ROOT_PASSWORD=\n# --- /brick:minio ---\n' >> "$repo/deploy/.env.prod.example"
+printf '\n# --- brick:demo ---\nDEMO_PASSWORD=\n# --- /brick:demo ---\n' >> "$repo/deploy/.env.prod.example"
 printf 'LAST_PASSWORD=' >> "$repo/deploy/.env.prod.example"   # final line, no trailing newline
 cp "$root/scripts/init-prod-env.sh" "$repo/scripts/"
 git -C "$repo" init -q -b main
@@ -25,8 +25,8 @@ grep -q '^APP_IMAGE=ghcr.io/owner/my-repo$' "$env_file" || fail "APP_IMAGE not d
 grep -q '^COMPOSE_PROJECT_NAME=my-repo$' "$env_file" || fail "COMPOSE_PROJECT_NAME wrong: $(grep COMPOSE_PROJECT_NAME "$env_file")"
 pw="$(grep '^POSTGRES_PASSWORD=' "$env_file" | cut -d= -f2)"
 [[ "$pw" =~ ^[0-9a-f]{48}$ ]] || fail "POSTGRES_PASSWORD not 48 hex chars: '$pw'"
-mpw="$(grep '^MINIO_ROOT_PASSWORD=' "$env_file" | cut -d= -f2)"
-[[ "$mpw" =~ ^[0-9a-f]{48}$ ]] || fail "MINIO_ROOT_PASSWORD not generated: '$mpw'"
+mpw="$(grep '^DEMO_PASSWORD=' "$env_file" | cut -d= -f2)"
+[[ "$mpw" =~ ^[0-9a-f]{48}$ ]] || fail "DEMO_PASSWORD not generated: '$mpw'"
 [[ "$mpw" != "$pw" ]] || fail "both passwords identical"
 lpw="$(grep '^LAST_PASSWORD=' "$env_file" | cut -d= -f2 || true)"
 [[ "$lpw" =~ ^[0-9a-f]{48}$ ]] || fail "unterminated last line dropped or not generated: '$lpw'"
