@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Creates deploy/.env.prod on the VPS from deploy/.env.prod.example.
 #
-# Why a script: the production database must never run with the local app/app defaults, and the password should be
-# generated on the host that uses it, never typed, pasted or committed. The script also derives the image name and
+# Why a script: the production database must never run with the local app/app defaults, and passwords should be
+# generated on the host that uses them, never typed, pasted or committed. The script also derives the image name and
 # compose project name from the git remote, so the two values most likely to be mistyped never are.
+#
+# Every empty *PASSWORD= line in deploy/.env.prod.example (POSTGRES_PASSWORD, and any a brick added) gets a fresh value.
 #
 # Usage: scripts/init-prod-env.sh [--force]     (or: make prod-init)
 set -euo pipefail
@@ -16,7 +18,7 @@ example="$root/deploy/.env.prod.example"
 target="$root/deploy/.env.prod"
 
 if [[ -e "$target" && "$force" == false ]]; then
-  echo "Refusing: $target already exists. Re-run with --force to replace it (this generates a NEW database password," >&2
+  echo "Refusing: $target already exists. Re-run with --force to replace it (this generates NEW passwords," >&2
   echo "which only makes sense before the first 'make prod-up' or together with a database reset)." >&2
   exit 1
 fi
@@ -36,8 +38,9 @@ cat <<BANNER
 
       $target
 
-  It will contain a freshly generated POSTGRES_PASSWORD and is chmod 600. It is gitignored and must stay on this host.
-$( [[ "$force" == true ]] && printf '\n  --force: the existing file will be OVERWRITTEN and the database password REPLACED.\n' )
+  It will contain a freshly generated value for every "*PASSWORD=" line (POSTGRES_PASSWORD and any a brick added)
+  and is chmod 600. It is gitignored and must stay on this host.
+$( [[ "$force" == true ]] && printf '\n  --force: the existing file will be OVERWRITTEN and every generated password REPLACED.\n' )
   Derived from the git remote:
       APP_IMAGE=$image
       COMPOSE_PROJECT_NAME=$project
@@ -46,12 +49,15 @@ BANNER
 read -r -p "  Type 'yes' to continue: " answer
 [[ "$answer" == "yes" ]] || { echo "Aborted; nothing written."; exit 1; }
 
-password="$(openssl rand -hex 24)"
 umask 077
-sed -e "s#^POSTGRES_PASSWORD=.*#POSTGRES_PASSWORD=${password}#" \
-    -e "s#^APP_IMAGE=.*#APP_IMAGE=${image}#" \
+# Every empty *PASSWORD= line in the example gets its own generated value: the core database password and whatever
+# an enabled brick asks for (bricks/README.md). Lines with a value are kept as they are.
+sed -e "s#^APP_IMAGE=.*#APP_IMAGE=${image}#" \
     -e "s#^COMPOSE_PROJECT_NAME=.*#COMPOSE_PROJECT_NAME=${project}#" \
-    "$example" > "$target"
+    "$example" \
+| while IFS= read -r line; do
+    if [[ "$line" =~ ^([A-Z0-9_]*PASSWORD)=$ ]]; then printf '%s=%s\n' "${BASH_REMATCH[1]}" "$(openssl rand -hex 24)"; else printf '%s\n' "$line"; fi
+  done > "$target"
 chmod 600 "$target"
 
 cat <<NEXT
@@ -62,6 +68,6 @@ cat <<NEXT
       DOMAIN=          public hostname, DNS A record already pointing at this VPS
       ACME_EMAIL=      Let's Encrypt account e-mail
 
-  Optional: GRAFANA_CLOUD_PROM_* and COMPOSE_PROFILES=observability for metrics in Grafana Cloud.
+  Optional: make add BRICK=<name> for observability, backups or object storage (make bricks lists them).
   Then:  make prod-up
 NEXT
