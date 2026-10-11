@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+# Add, remove and list bricks: self-contained optional infrastructure under bricks/<name>/ (bricks/README.md).
+#
+#   scripts/brick.sh list                 every brick, [x] when enabled, with its README's first line
+#   scripts/brick.sh add <name>           wire the brick in and list it in .bricks
+#   scripts/brick.sh remove <name>        undo add, leaving nothing behind
+#
+# A brick is wired by the files it contains (each optional):
+#   compose.yml            include: entry in compose.yml                    marker:  # brick:<name>
+#   compose.prod.yml       include: entry in deploy/compose.prod.yml
+#   env.example            block appended to .env.example                   markers: # --- brick:<name> --- … # --- /brick:<name> ---
+#   env.prod.example       block appended to deploy/.env.prod.example
+#   java/{main,test}/**    copied under services/<svc>/src/{main,test}/java/<package>/, __PKG__ → service package
+#   resources/{main,test}/** copied under services/<svc>/src/{main,test}/resources/
+#   skill/SKILL.md         copied to .claude/skills/<name>/SKILL.md
+#   brick.gradle.kts       applied by the service build for every name in .bricks; the lockfile is refreshed here
+#   Makefile               included by the root Makefile for every name in .bricks; nothing to copy
+# Both commands are idempotent and never commit. GRADLE (default ./gradlew) and BRICK_SERVICE (default app) can
+# be overridden, which the tests use.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+service="${BRICK_SERVICE:-app}"
+service_dir="services/${service}"
+bricks_file=".bricks"
+gradle="${GRADLE:-./gradlew}"
+
+usage() { sed -n '2,19p' "$0" >&2; exit 2; }
+die() { echo "brick: $*" >&2; exit 1; }
+
+enabled() { [[ -f "$bricks_file" ]] && grep -qx "$1" "$bricks_file"; }
+service_package() {
+  local pkg
+  pkg="$(sed -n 's/^group = "\(.*\)"$/\1/p' "$service_dir/build.gradle.kts")"
+  [[ -n "$pkg" ]] || die "cannot read 'group = \"…\"' from $service_dir/build.gradle.kts"
+  printf '%s' "$pkg"
+}
+
+# --- compose include lines ------------------------------------------------------------------------------------------
+include_add() { # file, include path, brick
+  local file="$1" path="$2" b="$3" line
+  line="  - ${path}  # brick:${b}"
+  grep -q "# brick:${b}\$" "$file" && return 0
+  if grep -q '^include:' "$file"; then
+    awk -v l="$line" '{ print } /^include:/ { print l }' "$file" > "$file.tmp"
+  else
+    # New key goes before the first top-level key, after the header comments.
+    awk -v l="$line" 'BEGIN { done = 0 } !done && /^[A-Za-z]/ { print "include:"; print l; done = 1 } { print }' "$file" > "$file.tmp"
+  fi
+  mv "$file.tmp" "$file"
+  echo "  ~ $file: include ${path}"
+}
+include_remove() { # file, brick
+  local file="$1" b="$2"
+  grep -q "# brick:${b}\$" "$file" || return 0
+  sed -i "/# brick:${b}\$/d" "$file"
+  # Drop the key when no entry is left under it.
+  if ! sed -n '/^include:/{n;p}' "$file" | grep -q '^  - '; then sed -i '/^include:$/d' "$file"; fi
+  echo "  ~ $file: include removed"
+}
+
+# --- env marker blocks ----------------------------------------------------------------------------------------------
+block_add() { # file, source block, brick
+  local file="$1" src="$2" b="$3"
+  grep -q "^# --- brick:${b} ---\$" "$file" && return 0
+  { printf '\n# --- brick:%s ---\n' "$b"; cat "$src"; printf '# --- /brick:%s ---\n' "$b"; } >> "$file"
+  echo "  ~ $file: block appended"
+}
+block_remove() { # file, brick
+  local file="$1" b="$2"
+  grep -q "^# --- brick:${b} ---\$" "$file" || return 0
+  grep -q "^# --- /brick:${b} ---\$" "$file" || die "$file: block for '${b}' has no end marker; fix it by hand"
+  sed -i "/^# --- brick:${b} ---\$/,/^# --- \/brick:${b} ---\$/d" "$file"
+  # Squeeze the blank line that preceded the block; keep exactly one trailing newline.
+  printf '%s\n' "$(cat -s "$file")" > "$file.tmp" && mv "$file.tmp" "$file"
+  echo "  ~ $file: block removed"
+}
+
+# --- java / resources -----------------------------------------------------------------------------------------------
+# Walks bricks/<b>/<kind>/<set> and calls "$4 <src file> <dst file>" for every file.
+each_file() { # brick, kind (java|resources), set (main|test), callback
+  local b="$1" kind="$2" set="$3" cb="$4" src dst f rel
+  src="bricks/${b}/${kind}/${set}"
+  [[ -d "$src" ]] || return 0
+  if [[ "$kind" == java ]]; then dst="$service_dir/src/${set}/java/$(service_package | tr . /)"; else dst="$service_dir/src/${set}/resources"; fi
+  while IFS= read -r -d '' f; do
+    rel="${f#"$src"/}"
+    "$cb" "$f" "$dst/$rel"
+  done < <(find "$src" -type f -print0 | sort -z)
+}
+copy_one() { # src, dst
+  local pkg; pkg="$(service_package)"
+  mkdir -p "$(dirname "$2")"
+  sed "s/__PKG__/${pkg}/g" "$1" > "$2"
+  echo "  + $2"
+}
+delete_one() { # src, dst
+  [[ -e "$2" ]] || return 0
+  rm -f "$2"; echo "  - $2"
+  # Prune directories the brick left empty, up to the source root.
+  local d; d="$(dirname "$2")"
+  while [[ "$d" == "$service_dir"/src/* ]] && rmdir "$d" 2>/dev/null; do d="$(dirname "$d")"; done
+}
+has_java() { [[ -d "bricks/$1/java" ]]; }
+
+refresh_lock() { "$gradle" ":${service}:dependencies" --write-locks -q && echo "  ~ $service_dir/gradle.lockfile refreshed"; }
+format_java() { "$gradle" ":${service}:spotlessApply" -q && echo "  ~ copied Java formatted"; }
+
+# --- commands -------------------------------------------------------------------------------------------------------
+cmd_list() {
+  local d b mark desc
+  shopt -s nullglob
+  for d in bricks/*/; do
+    b="$(basename "$d")"
+    mark=" "; enabled "$b" && mark="x"
+    desc="$(sed -n '1s/^#[[:space:]]*//p' "$d/README.md" 2>/dev/null || true)"
+    printf '  [%s] %-14s %s\n' "$mark" "$b" "$desc"
+  done
+}
+
+cmd_add() {
+  local b="$1"
+  [[ -d "bricks/$b" ]] || die "unknown brick '$b' (make bricks lists them)"
+  if enabled "$b"; then echo "brick '$b' is already enabled; nothing to do"; return 0; fi
+  echo "Adding brick '$b':"
+  [[ -f "bricks/$b/compose.yml" ]] && include_add compose.yml "bricks/$b/compose.yml" "$b"
+  [[ -f "bricks/$b/compose.prod.yml" ]] && include_add deploy/compose.prod.yml "../bricks/$b/compose.prod.yml" "$b"
+  [[ -f "bricks/$b/env.example" ]] && block_add .env.example "bricks/$b/env.example" "$b"
+  [[ -f "bricks/$b/env.prod.example" ]] && block_add deploy/.env.prod.example "bricks/$b/env.prod.example" "$b"
+  each_file "$b" java main copy_one; each_file "$b" java test copy_one
+  each_file "$b" resources main copy_one; each_file "$b" resources test copy_one
+  if [[ -f "bricks/$b/skill/SKILL.md" ]]; then mkdir -p ".claude/skills/$b"; cp "bricks/$b/skill/SKILL.md" ".claude/skills/$b/SKILL.md"; echo "  + .claude/skills/$b/SKILL.md"; fi
+  echo "$b" >> "$bricks_file"; echo "  ~ $bricks_file: + $b"
+  [[ -f "bricks/$b/brick.gradle.kts" ]] && refresh_lock
+  has_java "$b" && format_java
+  echo "Enabled '$b'. Read bricks/$b/README.md, then: make build && make test-scripts"
+}
+
+cmd_remove() {
+  local b="$1"
+  [[ -d "bricks/$b" ]] || die "unknown brick '$b' (make bricks lists them)"
+  enabled "$b" || die "brick '$b' is not enabled"
+  echo "Removing brick '$b':"
+  include_remove compose.yml "$b"
+  include_remove deploy/compose.prod.yml "$b"
+  block_remove .env.example "$b"
+  block_remove deploy/.env.prod.example "$b"
+  each_file "$b" java main delete_one; each_file "$b" java test delete_one
+  each_file "$b" resources main delete_one; each_file "$b" resources test delete_one
+  if [[ -f "bricks/$b/skill/SKILL.md" ]]; then rm -rf ".claude/skills/$b"; echo "  - .claude/skills/$b/"; fi
+  sed -i "/^${b}\$/d" "$bricks_file"; echo "  ~ $bricks_file: - $b"
+  [[ -f "bricks/$b/brick.gradle.kts" ]] && refresh_lock
+  echo "Disabled '$b'. Then: make build && make test-scripts"
+}
+
+cmd="${1:-}"; name="${2:-}"
+case "$cmd" in
+  list) cmd_list ;;
+  add) [[ -n "$name" ]] || usage; cmd_add "$name" ;;
+  remove) [[ -n "$name" ]] || usage; cmd_remove "$name" ;;
+  *) usage ;;
+esac
