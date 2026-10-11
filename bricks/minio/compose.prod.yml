@@ -1,0 +1,44 @@
+# minio brick, production: object storage on the data network, never published; the app reaches it as minio:9000.
+# Memory: 256m. Presigned URLs carry this internal endpoint: expose MinIO through Caddy yourself if browsers must
+# fetch objects directly (README.md).
+services:
+  minio:
+    image: cgr.dev/chainguard/minio:latest
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?run make prod-init (generates MINIO_ROOT_PASSWORD)}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [data]
+    mem_limit: 256m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    labels:
+      com.centurylinklabs.watchtower.enable: "false"
+
+  app:
+    environment:
+      APP_MINIO_ENDPOINT: http://minio:9000
+      APP_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio}
+      APP_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?run make prod-init (generates MINIO_ROOT_PASSWORD)}
+      APP_MINIO_BUCKET: ${APP_MINIO_BUCKET:-app}
+    depends_on:
+      minio:
+        condition: service_healthy
+
+networks:
+  data:
+
+volumes:
+  minio_data:

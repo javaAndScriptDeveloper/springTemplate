@@ -44,9 +44,9 @@ docker compose -f "$copy/compose.yml" --env-file "$copy/.env.example" --profile 
 prod "$copy" "$fixture_env" -q || fail "compose.prod.yml with every brick does not validate"
 if prod "$copy" /dev/null -q 2>/dev/null; then fail "with every brick, an empty env validated; a :? guard is gone"; fi
 all="$(prod "$copy")"
-for svc in backup alloy; do grep -qE "^  ${svc}:" <<<"$all" || fail "brick service ${svc} missing from the all-bricks render"; done  # TODO(minio brick): add minio
+for svc in backup alloy minio; do grep -qE "^  ${svc}:" <<<"$all" || fail "brick service ${svc} missing from the all-bricks render"; done
 # Every brick service is memory-limited and never rolled by Watchtower.
-for svc in backup alloy; do  # TODO(minio brick): add minio
+for svc in backup alloy minio; do
   svc_block "$svc" <<<"$all" | grep -q 'mem_limit' || fail "${svc} has no mem_limit"
   svc_block "$svc" <<<"$all" | grep -q 'com.centurylinklabs.watchtower.enable: "false"' || fail "${svc} is not excluded from Watchtower"
 done
@@ -66,9 +66,8 @@ grep -q 'target: /var/lock/backup' <<<"$all" || fail "backup lock is not on a sh
 grep -q 'target: /metrics$' <<<"$all" || fail "backup metrics volume missing"
 git -C "$root" check-ignore -q bricks/backup/rclone/rclone.conf || fail "bricks/backup/rclone/rclone.conf is not gitignored"
 # The minio brick extends app: endpoint env and a healthy-minio dependency.
-# TODO(minio brick): enable these two assertions
-#svc_block app <<<"$all" | grep -q 'APP_MINIO_ENDPOINT: http://minio:9000' || fail "app lacks APP_MINIO_ENDPOINT"
-#svc_block app <<<"$all" | grep -q 'minio:' || fail "app does not depend on minio"
+svc_block app <<<"$all" | grep -q 'APP_MINIO_ENDPOINT: http://minio:9000' || fail "app lacks APP_MINIO_ENDPOINT"
+svc_block app <<<"$all" | grep -q 'minio:' || fail "app does not depend on minio"
 # The rclone tokens live next to the Dockerfile: the build context must carry only what the image needs.
 [[ -f "$root/bricks/backup/.dockerignore" ]] || fail "bricks/backup has no .dockerignore (rclone tokens would enter the build context)"
 ctx="$(mktemp -d)"; mkdir -p "$ctx/rclone"; echo secret > "$ctx/rclone/rclone.conf"
