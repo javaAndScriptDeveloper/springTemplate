@@ -18,8 +18,8 @@ the rule that makes rolling deploys safe.
 ```bash
 git clone https://github.com/<owner>/<repo>.git && cd <repo>
 make prod-init           # deploy/.env.prod, mode 600, generated POSTGRES_PASSWORD
-$EDITOR deploy/.env.prod # DOMAIN, ACME_EMAIL; optional Grafana Cloud block + COMPOSE_PROFILES=observability
-make prod-up             # `compose config -q` first: every :? guard fires here, not after the stack is down
+$EDITOR deploy/.env.prod # DOMAIN, ACME_EMAIL (+ the env of any enabled brick)
+make prod-up             # (+ enabled bricks) `compose config -q` first: every :? guard fires here, not after the stack is down
 make prod-ps
 ```
 

@@ -10,6 +10,7 @@
 #   git tag vX.Y.Z + GitHub Release      generated notes list the commits since the previous release
 #
 # Pull requests run the same build, security checks and image build, and publish nothing.
+#
 # bricks: every brick added, built and removed on its own runner (not a gate)
 name: ci
 

@@ -3,17 +3,20 @@
 Spring Boot 4.1 / Java 25 service created from `spring-template`. Replace this paragraph with one sentence about
 what the service does; everything below stays true for every project built from the template.
 
+Core is one Spring service (`services/app`) + Postgres; everything else is a brick (`bricks/`, `make bricks`).
+
 ## Commands
 
 | Command | What | Time |
 |---|---|---|
-| `make run` | app on :8080, Postgres from `compose.yml` | 20 s |
+| `make run` | app on :8080, Postgres from `compose.yml` (`SERVICE=` picks the Gradle project, default `app`) | 20 s |
 | `make test` | unit tests, no Docker | 10 s |
 | `make itest` | integration tests, Testcontainers, one Postgres per fork | 1 min |
 | `make build` | everything CI's `build` job runs: Spotless, unit, integration, JaCoCo gate 60 % | 1–2 min |
 | `make test-scripts` | bash tests under `scripts/tests` | 5 s |
 | `make format` | `spotlessApply`; run before every commit that touches Java or `*.gradle.kts` | |
-| `make observability-up` | Prometheus + Grafana (`:3000`) + Alloy | |
+| `make bricks` | list bricks, `[x]` when enabled | |
+| `make add BRICK=<name>` / `make remove BRICK=<name>` | wire a brick in / take it out | |
 | `make release-name` | version the next push to main would release | |
 
 The tree is clean at `HEAD` (build, tests, Spotless): any failure after your change is yours. `make run`/`test`/
@@ -22,7 +25,7 @@ The tree is clean at `HEAD` (build, tests, Spotless): any failure after your cha
 ## How this is hosted and deployed
 
 - One Hetzner VPS running `deploy/compose.prod.yml`: Caddy (TLS, only published ports) → 2 `app` replicas →
-  Postgres (loopback only), plus Watchtower and Alloy (by compose profile).
+  Postgres (loopback only), plus Watchtower. Enabled bricks add their services through compose `include:`.
 - **Push to `main` = deploy.** `ci.yml` builds and tests, packages `ghcr.io/<owner>/<repo>:{latest,X.Y.Z,X.Y,sha-…}`,
   tags `vX.Y.Z`, publishes a GitHub Release, and waits until `${PRODUCTION_URL}/version` reports the new revision
   from every replica. Watchtower on the VPS pulls `latest` within 60 s and restarts replicas one at a time.
@@ -44,15 +47,17 @@ explains why. The hook and CI reject anything else. Details: `.claude/skills/rel
 locally. Read-only unless the user asked for a specific change; never fix schema by hand. Skill:
 `.claude/skills/vps-db/SKILL.md`.
 
-## Observability
+## Bricks
 
-`deploy/grafana/dashboards/app-overview.json` is the one dashboard; local Grafana loads it from disk, CI pushes it to
-Grafana Cloud on merge. `DashboardJsonTest` guards it. Alerts ship only when Telegram secrets exist. Metric names
-`app.<area>.<thing>`, low-cardinality tags only. Skill: `.claude/skills/grafana/SKILL.md`.
+`.bricks` lists enabled bricks. `make add BRICK=<name>` wires `bricks/<name>/` in (compose include, env blocks, Java
+copied into the service, skill, lockfile); `make remove` reverses it. Read `bricks/<name>/README.md` before touching a
+brick, `bricks/README.md` before authoring one. Skill: `.claude/skills/bricks/SKILL.md`. Observability (Grafana,
+alerts, dashboard) and backups are bricks; their invariants live in their READMEs.
 
 ## Conventions
 
-- Service code lives under `services/app` (Gradle project `:app`; `make run`/`dev`/`lock` take `SERVICE=`). Layers: `controller` → `service` → `repository`; `job` (schedulers, `*Scheduler`) may call services. Enforced by
+- Service code lives under `services/app` (Gradle project `:app`; `make run`/`dev`/`lock` take `SERVICE=`). Layers:
+  `controller` → `service` → `repository`; `job` (schedulers, `*Scheduler`) may call services. Enforced by
   `ArchitectureTest`, including constructor injection only, no `System.out`, `@Scheduled` only under `job`.
 - Liquibase owns the schema (`db/changelog/changes/*.yaml`, `includeAll`); Hibernate validates. Boot 4 needs
   `spring-boot-liquibase` on the classpath or nothing runs — it is there, do not remove it.

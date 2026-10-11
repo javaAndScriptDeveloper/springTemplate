@@ -37,6 +37,6 @@ Close it with `pkill -f 'ssh .*-L 15432:'` when done.
 - Schema belongs to Liquibase. Never fix a schema problem with ad-hoc DDL in prod; write a changeset.
 - Before a restore or rollback, read `docs/deployment.md` (rollback, expand/contract rules) and `bricks/backup/README.md` (backups/restore).
 - **Never run a restore.** `make prod-restore` overwrites the production database; hand the user the command
-  (`scripts/vps.sh ssh`, then `make prod-backup-list` and `make prod-restore STAMP=<stamp|latest>`) and let them run it.
+  (`scripts/vps.sh ssh`, then `make prod-backup-list` and `make prod-restore STAMP=<stamp|latest>`, both from the backup brick) and let them run it.
 - A `deploy` job failure means the image is published but the host did not pick it up: check
   `scripts/vps.sh logs watchtower` first (`Scanned=…` lines and `DOCKER_API_VERSION` errors).
