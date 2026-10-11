@@ -12,7 +12,8 @@ cat > "$tmp/bin/ssh" <<'FAKE'
 #!/usr/bin/env bash
 printf '%s\n' "$*" >> "$SSH_LOG"
 case "$*" in
-  *"cat "*".env.prod"*) printf 'POSTGRES_DB=app\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=s3cret\nPOSTGRES_HOST_PORT=5433\nDOMAIN=example.com\nGRAFANA_CLOUD_PROM_TOKEN=tok\nCOMPOSE_PROFILES=%s\n' "${FAKE_PROFILES:-}" ;;
+  *"cat "*".bricks"*) printf '%s\n' "${FAKE_BRICKS:-}" ;;
+  *"cat "*".env.prod"*) printf 'POSTGRES_DB=app\nPOSTGRES_USER=app\nPOSTGRES_PASSWORD=s3cret\nPOSTGRES_HOST_PORT=5433\nDOMAIN=example.com\nGRAFANA_CLOUD_PROM_TOKEN=tok\n' ;;
   *"backup status"*) [[ -n "${FAKE_BACKUP_STATUS:-}" ]] && printf '%s\n' "$FAKE_BACKUP_STATUS"; exit "${FAKE_BACKUP_RC:-0}" ;;
   *) echo "fake-ssh: $*" ;;
 esac
@@ -48,22 +49,16 @@ grep -q "cd /srv/app" "$SSH_LOG" || fail "ps did not cd into VPS_APP_DIR: $(cat 
 grep -q "compose.prod.yml" "$SSH_LOG" || fail "ps did not use the prod compose file: $(cat "$SSH_LOG")"
 
 # deploy-status: one backup line, three states.
-out="$(FAKE_PROFILES=observability "$script" deploy-status)"
-[[ "$out" == *"backups: DISABLED"* ]] || fail "disabled backups not reported: $out"
-out="$(FAKE_PROFILES=backup,observability FAKE_BACKUP_STATUS="last successful backup: 20260928T060000Z (3h ago)" "$script" deploy-status)"
+out="$(FAKE_BRICKS=observability "$script" deploy-status)"
+[[ "$out" == *"backups: brick off"* ]] || fail "disabled backups not reported: $out"
+out="$(FAKE_BRICKS="# bricks"$'\nbackup\nobservability' FAKE_BACKUP_STATUS="last successful backup: 20260928T060000Z (3h ago)" "$script" deploy-status)"
 [[ "$out" == *"backups: ok — last successful backup: 20260928T060000Z (3h ago)"* ]] || fail "fresh backup line: $out"
-out="$(FAKE_PROFILES="observability,backup" FAKE_BACKUP_RC=1 FAKE_BACKUP_STATUS="no successful backup yet" "$script" deploy-status)" \
+out="$(FAKE_BRICKS=$'observability\nbackup' FAKE_BACKUP_RC=1 FAKE_BACKUP_STATUS="no successful backup yet" "$script" deploy-status)" \
   || fail "deploy-status must not fail because backups are stale"
 [[ "$out" == *"backups: STALE — no successful backup yet"* ]] || fail "stale backup line: $out"
-# Quoted values are valid for compose; the quotes are not part of the value.
-for quoted in '"backup,observability"' "'backup'"; do
-  out="$(FAKE_PROFILES="$quoted" FAKE_BACKUP_STATUS="last successful backup: 20260928T060000Z (3h ago)" "$script" deploy-status)"
-  [[ "$out" == *"backups: ok"* ]] || fail "COMPOSE_PROFILES=$quoted reported as: $out"
-done
-
-# backup-status: runs status with the profile forced and passes its exit code through.
+# backup-status: runs status and passes its exit code through.
 : > "$SSH_LOG"
 if FAKE_BACKUP_RC=1 "$script" backup-status >/dev/null; then fail "backup-status hid a stale backup"; fi
-grep -q -- "--profile backup run --rm -T backup status" "$SSH_LOG" || fail "backup-status command: $(cat "$SSH_LOG")"
+grep -q -- "run --rm -T backup status" "$SSH_LOG" || fail "backup-status command: $(cat "$SSH_LOG")"
 
 echo "vps: all passed"

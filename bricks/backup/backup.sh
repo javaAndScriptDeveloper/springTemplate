@@ -50,7 +50,7 @@ last_success() {
 }
 
 preflight() {
-	[ -n "${REMOTE}" ] || die "RCLONE_REMOTE is not set; backups are off-host only (docs/deployment.md §6)"
+	[ -n "${REMOTE}" ] || die "RCLONE_REMOTE is not set; backups are off-host only (bricks/backup/README.md)"
 	case "${REMOTE}" in
 		*:*) ;;
 		*)

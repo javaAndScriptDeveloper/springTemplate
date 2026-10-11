@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Exercises deploy/backup/backup.sh under POSIX sh (as the alpine container runs it) with fake pg_* and rclone
+# Exercises bricks/backup/backup.sh under POSIX sh (as the alpine container runs it) with fake pg_* and rclone
 # binaries. No Docker, no network: the "remote" is a directory.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-root="$(cd "$here/../.." && pwd)"
-script="$root/deploy/backup/backup.sh"
+root="$(cd "$here/../../.." && pwd)"
+script="$root/bricks/backup/backup.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT

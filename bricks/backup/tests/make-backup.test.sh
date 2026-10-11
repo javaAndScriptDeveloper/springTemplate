@@ -2,7 +2,7 @@
 # Exercises the prod-backup-* and prod-restore Makefile targets with a fake `docker compose` passed as PROD.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-root="$(cd "$here/../.." && pwd)"
+root="$(cd "$here/../../.." && pwd)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
@@ -12,12 +12,12 @@ echo "$*" >> "$COMPOSE_LOG"
 case "$*" in
   "ps --status running --services") printf '%s\n' ${FAKE_RUNNING:-}; exit "${FAKE_PS_RC:-0}" ;;
   "stop "*) exit "${FAKE_STOP_RC:-0}" ;;
-  *" run "*) exit "${FAKE_RUN_RC:-0}" ;;
+  "run "*) exit "${FAKE_RUN_RC:-0}" ;;
 esac
 FAKE
 chmod +x "$tmp/compose"
 export COMPOSE_LOG="$tmp/compose.log"
-mk=(make -s -C "$root" --no-print-directory PROD="$tmp/compose")
+mk=(make -s -C "$root" --no-print-directory BRICKS=backup PROD="$tmp/compose")
 
 # No STAMP: usage error, compose never called.
 : > "$COMPOSE_LOG"
@@ -33,7 +33,7 @@ if echo no | "${mk[@]}" prod-restore STAMP=latest >/dev/null 2>&1; then fail "re
 echo yes | FAKE_RUNNING="app watchtower db" "${mk[@]}" prod-restore STAMP=latest >/dev/null || fail "confirmed restore failed"
 expected="ps --status running --services
 stop app watchtower
---profile backup run --rm -e RESTORE_CONFIRM=yes backup restore latest
+run --rm -e RESTORE_CONFIRM=yes backup restore latest
 start app watchtower"
 [[ "$(cat "$COMPOSE_LOG")" == "$expected" ]] || fail "unexpected sequence: $(cat "$COMPOSE_LOG")"
 
@@ -92,11 +92,11 @@ fi
 [[ -e "$marker" ]] && fail "STAMP backticks were executed by the shell: marker file created"
 [[ -s "$COMPOSE_LOG" ]] && fail "compose called with a backtick STAMP: $(cat "$COMPOSE_LOG")"
 
-# Backup verbs force the profile, so they work on a host whose .env.prod does not enable it.
+# Backup verbs run the sidecar directly; the brick is included, not profiled.
 for pair in now:once status:status list:list; do
   : > "$COMPOSE_LOG"
   "${mk[@]}" "prod-backup-${pair%%:*}" >/dev/null || fail "prod-backup-${pair%%:*} failed"
-  [[ "$(cat "$COMPOSE_LOG")" == "--profile backup run --rm backup ${pair#*:}" ]] \
+  [[ "$(cat "$COMPOSE_LOG")" == "run --rm backup ${pair#*:}" ]] \
     || fail "prod-backup-${pair%%:*}: $(cat "$COMPOSE_LOG")"
 done
 

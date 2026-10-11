@@ -32,6 +32,7 @@ updates:
   - package-ecosystem: docker
     directories:
       - /services/app
+      - /bricks/backup
     schedule:
       interval: weekly
       day: monday
@@ -44,6 +45,7 @@ updates:
     directories:
       - /
       - /deploy
+      - "/bricks/*"
     schedule:
       interval: weekly
       day: monday

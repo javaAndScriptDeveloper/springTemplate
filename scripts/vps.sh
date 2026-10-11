@@ -77,10 +77,9 @@ case "$cmd" in
     load_remote_env
     domain="$(env_value DOMAIN "")"
     [[ -n "$domain" ]] && { echo "https://${domain}/version →"; curl -fsS --max-time 10 "https://${domain}/version" || true; echo; }
-    profiles="$(env_value COMPOSE_PROFILES "")"
-    if [[ ",${profiles// /}," != *",backup,"* ]]; then
-      echo "backups: DISABLED (COMPOSE_PROFILES lacks backup; docs/deployment.md §6)"
-    elif status_out="$(prod "--profile backup run --rm -T backup status" 2>/dev/null)"; then
+    if ! remote "cat $app_dir/.bricks 2>/dev/null" | sed -e 's/#.*//' | grep -qx backup; then
+      echo "backups: brick off (make add BRICK=backup; bricks/backup/README.md)"
+    elif status_out="$(prod "run --rm -T backup status" 2>/dev/null)"; then
       echo "backups: ok — ${status_out//$'\n'/; }"
     else
       status_out="${status_out//$'\n'/; }"
@@ -88,7 +87,7 @@ case "$cmd" in
     fi ;;
 
   backup-status)
-    prod "--profile backup run --rm -T backup status" ;;
+    prod "run --rm -T backup status" ;;
 
   tunnel)
     load_remote_env
