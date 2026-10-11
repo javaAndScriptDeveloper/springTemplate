@@ -10,6 +10,7 @@
 #   git tag vX.Y.Z + GitHub Release      generated notes list the commits since the previous release
 #
 # Pull requests run the same build, security checks and image build, and publish nothing.
+# bricks: every brick added, built and removed on its own runner (not a gate)
 name: ci
 
 on:
@@ -116,6 +117,51 @@ jobs:
       - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: zizmor (workflow misconfiguration)
         run: uvx zizmor@1.30.1 --min-severity medium .github/workflows
+
+  # Bricks are inert until enabled, so the plain build cannot catch a brick that rotted. Each one is added on a
+  # clean checkout, built with its tests, and removed again; nothing here gates the image, so push → live stays fast.
+  bricks:
+    name: Brick ${{ matrix.brick }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        brick: [observability, backup, minio]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-read-only: true
+
+      - name: Add the brick
+        env:
+          BRICK: ${{ matrix.brick }}
+        run: scripts/brick.sh add "$BRICK"
+
+      - name: Build with the brick
+        run: ./gradlew build --no-daemon
+
+      - name: Script tests and compose render with the brick
+        run: |
+          scripts/tests/run.sh
+          docker compose --env-file .env.example --profile full --profile observability config -q
+          docker compose -f deploy/compose.prod.yml --env-file scripts/tests/fixtures/env.prod.test config -q
+
+      - name: Remove the brick and prove nothing is left
+        env:
+          BRICK: ${{ matrix.brick }}
+        run: |
+          scripts/brick.sh remove "$BRICK"
+          git status --porcelain
+          test -z "$(git status --porcelain)"
 
   image:
     name: Build image
