@@ -35,7 +35,7 @@ Close it with `pkill -f 'ssh .*-L 15432:'` when done.
 - **Never paste secrets into the chat.** Use `env` (masked), not `cat`. The JDBC URL from `datagrip` contains the
   password: show it once because the user asked for it, do not repeat it in summaries.
 - Schema belongs to Liquibase. Never fix a schema problem with ad-hoc DDL in prod; write a changeset.
-- Before a restore or rollback, read `docs/deployment.md` (§6 backups/restore, rollback, expand/contract rules).
+- Before a restore or rollback, read `docs/deployment.md` (rollback, expand/contract rules) and `bricks/backup/README.md` (backups/restore).
 - **Never run a restore.** `make prod-restore` overwrites the production database; hand the user the command
   (`scripts/vps.sh ssh`, then `make prod-backup-list` and `make prod-restore STAMP=<stamp|latest>`) and let them run it.
 - A `deploy` job failure means the image is published but the host did not pick it up: check

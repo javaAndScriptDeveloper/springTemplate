@@ -77,7 +77,7 @@ case "$cmd" in
     load_remote_env
     domain="$(env_value DOMAIN "")"
     [[ -n "$domain" ]] && { echo "https://${domain}/version →"; curl -fsS --max-time 10 "https://${domain}/version" || true; echo; }
-    if ! remote "cat $app_dir/.bricks 2>/dev/null" | sed -e 's/#.*//' | grep -qx backup; then
+    if ! remote "cat .bricks 2>/dev/null" | sed -e 's/#.*//' -e 's/[[:space:]]*$//' | grep -qx backup; then
       echo "backups: brick off (make add BRICK=backup; bricks/backup/README.md)"
     elif status_out="$(prod "run --rm -T backup status" 2>/dev/null)"; then
       echo "backups: ok — ${status_out//$'\n'/; }"

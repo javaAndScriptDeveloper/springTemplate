@@ -33,7 +33,9 @@ docker run --rm -v "$root/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=ex
 # --- every brick added, on a scratch copy of the working tree ---------------------------------------------------
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 copy="$tmp/repo"; mkdir -p "$copy"
-(cd "$root" && git ls-files -z --cached --others --exclude-standard | tar --null -T - -cf - 2>/dev/null) | tar -xf - -C "$copy"
+# Files deleted in the working tree are still "cached"; leave them out or tar exits non-zero.
+(cd "$root" && comm -z -23 <(git ls-files -z --cached --others --exclude-standard | sort -z) <(git ls-files -z --deleted | sort -z) \
+  | tar --null -T - -cf - 2>/dev/null) | tar -xf - -C "$copy"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$copy/gradlew"; chmod +x "$copy/gradlew"
 for d in "$copy"/bricks/*/; do (cd "$copy" && GRADLE=./gradlew scripts/brick.sh add "$(basename "$d")" >/dev/null) || fail "brick add failed for $d"; done
 
@@ -67,4 +69,17 @@ git -C "$root" check-ignore -q bricks/backup/rclone/rclone.conf || fail "bricks/
 # TODO(minio brick): enable these two assertions
 #svc_block app <<<"$all" | grep -q 'APP_MINIO_ENDPOINT: http://minio:9000' || fail "app lacks APP_MINIO_ENDPOINT"
 #svc_block app <<<"$all" | grep -q 'minio:' || fail "app does not depend on minio"
+# The rclone tokens live next to the Dockerfile: the build context must carry only what the image needs.
+[[ -f "$root/bricks/backup/.dockerignore" ]] || fail "bricks/backup has no .dockerignore (rclone tokens would enter the build context)"
+ctx="$(mktemp -d)"; mkdir -p "$ctx/rclone"; echo secret > "$ctx/rclone/rclone.conf"
+cp "$root/bricks/backup/backup.sh" "$root/bricks/backup/.dockerignore" "$ctx/"
+printf 'FROM busybox\nCOPY . /ctx\nRUN find /ctx -type f | sort\n' > "$ctx/Dockerfile.ctx"
+listing="$(docker build --no-cache --progress=plain -f "$ctx/Dockerfile.ctx" "$ctx" 2>&1)" || fail "context probe build failed: $listing"
+rm -rf "$ctx"
+grep -q '/ctx/backup.sh' <<<"$listing" || fail "backup.sh missing from the build context"
+grep -q '/ctx/rclone' <<<"$listing" && fail "rclone config reaches the docker build context"
+
+sh -n "$root/bricks/backup/backup.sh" || fail "backup.sh has a syntax error"
+if command -v shellcheck >/dev/null; then shellcheck -s sh "$root/bricks/backup/backup.sh" || fail "shellcheck backup.sh"; fi
+
 echo "deploy-config: all passed"
