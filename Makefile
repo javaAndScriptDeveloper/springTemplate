@@ -11,8 +11,8 @@ PROD := docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod
 # Enabled bricks (bricks/README.md): names from .bricks, comments and blanks dropped. Each enabled brick's Makefile
 # is included at the bottom of this file, so its targets show up in `make help`.
 BRICKS ?= $(shell sed -e 's/\#.*//' -e '/^[[:space:]]*$$/d' .bricks 2>/dev/null)
-# Gradle project under services/ that run/dev/lock address.
-SERVICE ?= app
+# Gradle project under services/ that run/dev/lock/up/image address (SERVICE is the logs filter below).
+GRADLE_SERVICE ?= app
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -21,10 +21,10 @@ setup: ## One-time: install the commit-msg hook that enforces conventional commi
 	@git config core.hooksPath .githooks && echo "git hooks: .githooks (commit-msg enforces conventional commits)"
 
 run: setup ## Run the app (auto-starts the compose DB)
-	./gradlew :$(SERVICE):bootRun
+	./gradlew :$(GRADLE_SERVICE):bootRun
 
 dev: ## Run with a throwaway Testcontainers DB (no docker-compose needed)
-	./gradlew :$(SERVICE):bootTestRun
+	./gradlew :$(GRADLE_SERVICE):bootTestRun
 
 test: setup ## Run unit tests (no Docker needed)
 	./gradlew test
@@ -33,7 +33,7 @@ itest: ## Run integration tests (Testcontainers; one Postgres per fork)
 	./gradlew integrationTest
 
 lock: ## Refresh services/<service>/gradle.lockfile after changing dependencies
-	./gradlew :$(SERVICE):dependencies --write-locks -q
+	./gradlew :$(GRADLE_SERVICE):dependencies --write-locks -q
 
 release-name: ## Print the version the next push to main would release
 	@scripts/next-version.sh
@@ -57,15 +57,15 @@ db-down: ## Stop the local Postgres
 	docker compose stop db
 
 up: ## Build the jar + image and run app + db with $(ENV_FILE)
-	./gradlew :$(SERVICE):bootJar -q
+	./gradlew :$(GRADLE_SERVICE):bootJar -q
 	docker compose --env-file $(ENV_FILE) --profile full up --build -d
 
 down: ## Stop the full stack
 	docker compose --profile full down
 
 image: ## Build the jar and the OCI image (tag: $(APP_NAME))
-	./gradlew :$(SERVICE):bootJar -q
-	docker build -f services/$(SERVICE)/Dockerfile -t $(APP_NAME) .
+	./gradlew :$(GRADLE_SERVICE):bootJar -q
+	docker build -f services/$(GRADLE_SERVICE)/Dockerfile -t $(APP_NAME) .
 
 clean: ## Remove build artifacts
 	./gradlew clean
@@ -91,7 +91,7 @@ vps-ssh: ## Shell on the VPS in the app directory (VPS_SSH from .env)
 vps-ps: ## Production containers and health
 	scripts/vps.sh ps
 
-vps-logs: ## Tail production logs (SERVICE=app)
+vps-logs: ## Tail production logs (all services; SERVICE=app to narrow)
 	scripts/vps.sh logs $(SERVICE)
 
 vps-status: ## Image tag per replica and what /version answers
@@ -122,7 +122,7 @@ prod-down: ## Stop the production stack (volumes are kept)
 prod-ps: ## Show production containers and their health
 	$(PROD) ps
 
-prod-logs: ## Tail production logs (SERVICE=app to narrow)
+prod-logs: ## Tail production logs (all services; SERVICE=app to narrow)
 	$(PROD) logs -f --tail=200 $(SERVICE)
 
 prod-pull: ## Pull the current APP_IMAGE_TAG now instead of waiting for Watchtower

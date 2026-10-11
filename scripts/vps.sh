@@ -70,7 +70,7 @@ case "$cmd" in
     prod ps ;;
 
   logs)
-    prod logs -f --tail=200 "${1:-}" ;;
+    prod logs -f --tail=200 ${1:+"$1"} ;;
 
   deploy-status)
     prod "ps --format '{{.Service}} {{.Image}} {{.Status}}'" | grep -E '^app ' || true

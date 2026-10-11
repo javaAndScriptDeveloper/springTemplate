@@ -9,7 +9,7 @@ Core is one Spring service (`services/app`) + Postgres; everything else is a bri
 
 | Command | What | Time |
 |---|---|---|
-| `make run` | app on :8080, Postgres from `compose.yml` (`SERVICE=` picks the Gradle project, default `app`) | 20 s |
+| `make run` | app on :8080, Postgres from `compose.yml` (`GRADLE_SERVICE=` picks the Gradle project, default `app`) | 20 s |
 | `make test` | unit tests, no Docker | 10 s |
 | `make itest` | integration tests, Testcontainers, one Postgres per fork | 1 min |
 | `make build` | everything CI's `build` job runs: Spotless, unit, integration, JaCoCo gate 60 % | 1–2 min |
@@ -56,7 +56,7 @@ alerts, dashboard) and backups are bricks; their invariants live in their README
 
 ## Conventions
 
-- Service code lives under `services/app` (Gradle project `:app`; `make run`/`dev`/`lock` take `SERVICE=`). Layers:
+- Service code lives under `services/app` (Gradle project `:app`; `make run`/`dev`/`lock` take `GRADLE_SERVICE=`). Layers:
   `controller` → `service` → `repository`; `job` (schedulers, `*Scheduler`) may call services. Enforced by
   `ArchitectureTest`, including constructor injection only, no `System.out`, `@Scheduled` only under `job`.
 - Liquibase owns the schema (`db/changelog/changes/*.yaml`, `includeAll`); Hibernate validates. Boot 4 needs
