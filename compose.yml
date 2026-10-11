@@ -2,9 +2,9 @@
 #
 #   make run                 → spring-boot-docker-compose starts `db` (the only un-profiled service) and wires the
 #                              datasource; you rarely start it by hand.
-#   make observability-up    → Prometheus + Grafana + Alloy. Grafana at http://localhost:3000 shows the same
-#                              dashboard production uses; Alloy scrapes the app you run on the host.
 #   make up                  → the app image too (profile `full`), for checking the container end to end.
+#
+# Bricks add their services through `include:` (bricks/README.md).
 #
 # Tests never use this file: Testcontainers gives each fork its own PostgreSQL.
 services:
@@ -44,65 +44,5 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-app}
     restart: unless-stopped
 
-  # --- observability profile -------------------------------------------------------------------------------------
-  # Same push path as production: Alloy scrapes /actuator/prometheus and remote-writes, here into a throwaway
-  # Prometheus instead of Grafana Cloud. The dashboard JSON and the Alloy config are the production files.
-
-  prometheus:
-    profiles: ["observability"]
-    image: prom/prometheus:v3.1.0
-    command:
-      - --config.file=/etc/prometheus/prometheus.yml
-      - --web.enable-remote-write-receiver
-      - --storage.tsdb.retention.time=24h
-    volumes:
-      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-    ports:
-      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
-
-  grafana:
-    profiles: ["observability"]
-    image: grafana/grafana:11.5.1
-    environment:
-      GF_AUTH_ANONYMOUS_ENABLED: "true"
-      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
-      GF_AUTH_DISABLE_LOGIN_FORM: "true"
-      GF_USERS_DEFAULT_THEME: dark
-    volumes:
-      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./deploy/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    ports:
-      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
-    depends_on:
-      - prometheus
-
-  alloy:
-    profiles: ["observability"]
-    image: grafana/alloy:v1.10.0
-    command:
-      - run
-      - --server.http.listen-addr=0.0.0.0:12345
-      - --storage.path=/var/lib/alloy/data
-      - /etc/alloy/config.alloy
-    volumes:
-      - ./deploy/alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - alloy-data:/var/lib/alloy/data
-    environment:
-      GRAFANA_CLOUD_PROM_URL: http://prometheus:9090/api/v1/write
-      GRAFANA_CLOUD_PROM_USER: local
-      GRAFANA_CLOUD_PROM_TOKEN: local
-      # The app normally runs on the HOST (`make run`); host-gateway is how a container reaches it on Linux, and a
-      # static target is used because /etc/hosts aliases are invisible to DNS discovery (see config.alloy).
-      APP_METRICS_STATIC_TARGET: host.docker.internal:${APP_METRICS_PORT:-8080}
-      APP_METRICS_HOST: alloy
-      APP_ENV: local
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    ports:
-      - "127.0.0.1:${ALLOY_PORT:-12345}:12345"
-    depends_on:
-      - prometheus
-
 volumes:
   db-data:
-  alloy-data:

@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
-# Pushes deploy/grafana/** to a Grafana instance, or pulls the dashboard back after editing it in the UI.
+# Pushes bricks/observability/grafana/** to a Grafana instance, or pulls the dashboard back after editing it in the UI.
 #
 #   grafana-push.sh local            → http://localhost:3000 (compose observability profile, anonymous admin)
 #   grafana-push.sh cloud            → $GRAFANA_URL with $GRAFANA_API_TOKEN (service account, dashboards:write +
-#                                      alert.provisioning:write). CI runs this on every change under deploy/grafana.
-#   grafana-push.sh pull             → export the dashboard from local Grafana into deploy/grafana/dashboards.
+#                                      alert.provisioning:write). CI runs this on every change under bricks/observability/grafana.
+#   grafana-push.sh pull             → export the dashboard from local Grafana into bricks/observability/grafana/dashboards.
 #
 # Alerting (contact point, notification policy, rules) is pushed only when TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID
 # are set; otherwise the dashboards go up and a notice explains what was skipped. Values are read from the
 # environment first, then from .env in the repository root.
 set -euo pipefail
 
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-assets="$root/deploy/grafana"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+root="$(cd "$here/../.." && pwd)"
+assets="$here/grafana"
 dashboard_uid="app-overview"
 folder_uid="app"
 folder_title="App"

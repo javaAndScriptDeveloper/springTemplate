@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Exercises scripts/grafana-push.sh against a fake curl that records every call.
+# Exercises bricks/observability/grafana-push.sh against a fake curl that records every call.
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-root="$(cd "$here/../.." && pwd)"
-script="$root/scripts/grafana-push.sh"
+root="$(cd "$here/../../.." && pwd)"
+script="$root/bricks/observability/grafana-push.sh"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT

@@ -10,8 +10,8 @@
 # Only Caddy publishes ports (80/443). Postgres listens on the loopback interface for SSH tunnels. The management
 # port (8081) is neither published nor proxied.
 #
-# Memory budget (mem_limit): caddy 64m + app 2×512m + db 384m + watchtower 48m + backup 64m + alloy 128m ≈ 1.7 GB,
-# which fits a 4 GB VPS with room for the OS. Re-check this sum whenever a service is added or a limit raised.
+# Memory budget (mem_limit): caddy 64m + app 2×512m + db 384m + watchtower 48m ≈ 1.5 GB; every brick's README states
+# what it adds. Re-check this sum whenever a service is added or a limit raised.
 
 name: ${COMPOSE_PROJECT_NAME:?run make prod-init (sets COMPOSE_PROJECT_NAME from the git remote)}
 
@@ -190,36 +190,6 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 
-  alloy:
-    # Enabled by COMPOSE_PROFILES=observability in deploy/.env.prod. No :? guards on purpose: compose interpolates
-    # every service even when its profile is inactive, and a stack without Grafana Cloud must still start.
-    profiles: ["observability"]
-    image: grafana/alloy:v1.10.0
-    restart: unless-stopped
-    command:
-      - run
-      - --server.http.listen-addr=0.0.0.0:12345
-      - --storage.path=/var/lib/alloy/data
-      - /etc/alloy/config.alloy
-    volumes:
-      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - alloy_data:/var/lib/alloy/data
-      # The backup sidecar's backup.prom (empty when the backup profile is off).
-      - backup_metrics:/metrics/backup:ro
-    environment:
-      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL:-}
-      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER:-}
-      GRAFANA_CLOUD_PROM_TOKEN: ${GRAFANA_CLOUD_PROM_TOKEN:-}
-      # Docker's embedded DNS answers `app` with every replica's address.
-      APP_METRICS_HOST: app
-      APP_METRICS_PORT: "8081"
-      APP_ENV: ${APP_ENV:-prod}
-    networks: [edge]
-    mem_limit: 128m
-    logging: *default-logging
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"
-
 networks:
   # Only `app` joins both: a compromised proxy cannot reach the database.
   edge:
@@ -229,6 +199,5 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
-  alloy_data:
   backup_lock:
   backup_metrics:

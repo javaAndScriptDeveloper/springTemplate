@@ -1,4 +1,23 @@
-# Observability
+# observability: Alloy → Grafana Cloud in prod, Prometheus + Grafana locally, one dashboard, Telegram alerts
+
+`make add BRICK=observability`, then fill the `GRAFANA_CLOUD_PROM_*` block in `deploy/.env.prod` (Grafana Cloud →
+stack → Prometheus → *Send metrics*) and `make prod-up`. Memory: alloy 128m.
+
+## What you get
+- Local: `make observability-up` → Grafana http://localhost:3000 with the production dashboard, Prometheus, Alloy
+  scraping the app you run on the host.
+- Prod: Alloy on the `edge` network scrapes every app replica (`app:8081/actuator/prometheus`) and remote-writes.
+- `grafana/dashboards/app-overview.json` (one dashboard: version + deploy markers, RED, JVM, Hikari, logs, circuit
+  breakers), `grafana/alerting/rules.json` (ServiceDown, 5xx > 5 %, DB connections pending, heap > 90 %,
+  BackupStale), Telegram contact point. CI (`.github/workflows/dashboards.yml`) pushes them on merge when
+  `GRAFANA_URL` + `GRAFANA_API_TOKEN` exist; alerts only when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` exist too.
+- `DashboardJsonTest` (copied into the service) keeps the JSON honest.
+
+## Invariants
+- Metric names `app.<area>.<thing>`, low-cardinality tags only.
+- `BackupStale` threshold (43200 s in `rules.json`) ≥ `BACKUP_MAX_AGE_HOURS` and ≥ 2 × the `BACKUP_CRON` interval
+  of the backup brick, or every late run pages. Without the backup brick the rule sees no data and stays quiet.
+- Alloy declares the `backup_metrics` volume itself so it starts with or without the backup brick.
 
 Metrics only, pushed. No log shipping, no tracing: `make prod-logs` and Docker's json-file rotation cover a
 single-VPS service; add Loki or OTel when you outgrow that.
@@ -7,10 +26,10 @@ single-VPS service; add Loki or OTel when you outgrow that.
 
 ```
 app  /actuator/prometheus  (management port 8081 in prod, 8080 locally)
- └─► Grafana Alloy  (deploy/alloy/config.alloy, same file everywhere)
-      └─► remote_write ─► Grafana Cloud Prometheus       (prod: COMPOSE_PROFILES=observability + GRAFANA_CLOUD_PROM_*)
-                       └► local Prometheus :9090         (compose.yml observability profile)
-                                └─► Grafana :3000, provisioned from deploy/grafana/
+ └─► Grafana Alloy  (bricks/observability/alloy/config.alloy, same file everywhere)
+      └─► remote_write ─► Grafana Cloud Prometheus       (prod: GRAFANA_CLOUD_PROM_*)
+                       └► local Prometheus :9090         (compose profile `observability`)
+                                └─► Grafana :3000, provisioned from bricks/observability/grafana/
 ```
 
 - In production Alloy discovers replicas by resolving the compose service name `app` (Docker's DNS returns every
@@ -23,7 +42,7 @@ app  /actuator/prometheus  (management port 8081 in prod, 8080 locally)
 
 ## Dashboard loop
 
-`deploy/grafana/dashboards/app-overview.json` is the source of truth; the local Grafana loads it from disk and Grafana
+`bricks/observability/grafana/dashboards/app-overview.json` is the source of truth; the local Grafana loads it from disk and Grafana
 Cloud receives it from CI. Datasource uid is `grafanacloud-prom` in both places, which is why one file works.
 
 ```bash
@@ -41,7 +60,7 @@ Ad-hoc pushes: `make grafana-push` (local), `make grafana-push-cloud` (`GRAFANA_
 
 ## Alerting
 
-`deploy/grafana/alerting/` holds one rule group (`app-baseline`), a Telegram contact point and the notification
+`bricks/observability/grafana/alerting/` holds one rule group (`app-baseline`), a Telegram contact point and the notification
 policy. They are pushed (by CI and by `grafana-push.sh`) only when `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID` are
 set; without them dashboards still ship and a notice says alerting was skipped.
 
@@ -54,7 +73,7 @@ set; without them dashboards still ship and a notice says alerting was skipped.
 | BackupStale | no successful off-host backup for 12 h; no data (backups off) stays quiet | 15 m |
 
 BackupStale reads `app_backup_last_success_timestamp_seconds`, which the backup sidecar writes as a textfile that
-Alloy picks up (`deploy/alloy/config.alloy`). Its 12 h threshold must stay ≥ `BACKUP_MAX_AGE_HOURS` and ≥ 2 × the
+Alloy picks up (`bricks/observability/alloy/config.alloy`). Its 12 h threshold must stay ≥ `BACKUP_MAX_AGE_HOURS` and ≥ 2 × the
 `BACKUP_CRON` interval. Runbook: `make prod-backup-status`, then `make prod-logs SERVICE=backup` on the VPS
 (`docs/deployment.md` §6). If backups were turned off on purpose, the last `backup.prom` is still on the
 `backup_metrics` volume and keeps the alert firing: delete it as described in §6 "Disable".

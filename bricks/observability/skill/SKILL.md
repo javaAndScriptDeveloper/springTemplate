@@ -1,13 +1,13 @@
 ---
-name: grafana
-description: Edit, push or pull the Grafana dashboard and alert rules under deploy/grafana. Use when the user wants a new panel, a changed alert, dashboards pushed to Grafana Cloud or local Grafana, or asks why a metric is missing from the dashboard.
+name: observability
+description: Edit, push or pull the Grafana dashboard and alert rules under bricks/observability/grafana. Use when the user wants a new panel, a changed alert, dashboards pushed to Grafana Cloud or local Grafana, or asks why a metric is missing from the dashboard.
 ---
 
 # Dashboards and alerting
 
-`deploy/grafana/dashboards/app-overview.json` is the single source of truth; the same file renders locally and in
+`bricks/observability/grafana/dashboards/app-overview.json` is the single source of truth; the same file renders locally and in
 Grafana Cloud because both datasources use uid `grafanacloud-prom`. Alert rules, the Telegram contact point and the
-notification policy live in `deploy/grafana/alerting/`.
+notification policy live in `bricks/observability/grafana/alerting/`.
 
 ## Loop for a dashboard change
 
@@ -16,7 +16,7 @@ notification policy live in `deploy/grafana/alerting/`.
 3. `make grafana-pull` writes the UI state back to the JSON (strips `id`/`version`).
 4. `./gradlew test --tests '*DashboardJsonTest'` — every `expr` must use a metric the app exports and every
    datasource must be the shared uid. Extend the known-metric list in the test when you add a new meter.
-5. Commit under `deploy/grafana/**`. The `dashboards` workflow pushes to Grafana Cloud on merge (needs the
+5. Commit under `bricks/observability/grafana/**`. The `dashboards` workflow pushes to Grafana Cloud on merge (needs the
    `GRAFANA_URL` and `GRAFANA_API_TOKEN` repository secrets).
 
 Ad-hoc push without CI: `make grafana-push` (local) or `make grafana-push-cloud` (`GRAFANA_URL`,

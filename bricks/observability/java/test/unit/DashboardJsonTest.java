@@ -1,4 +1,4 @@
-package com.example.company.unit;
+package __PKG__.unit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -14,13 +14,14 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 
 /**
- * Guards the committed Grafana assets under {@code deploy/grafana}: they are hand-edited JSON that only fails at
+ * Guards the committed Grafana assets under {@code bricks/observability/grafana}: they are hand-edited JSON that only fails at
  * push time otherwise. Every query must reference a metric this application (or its backup sidecar) exports, and
  * every datasource reference must use the shared uid so one file renders both locally and in Grafana Cloud.
  */
 class DashboardJsonTest {
 
-    private static final Path GRAFANA_DIR = Path.of(System.getProperty("repo.root", "."), "deploy", "grafana");
+    private static final Path GRAFANA_DIR =
+            Path.of(System.getProperty("repo.root", "../..")).resolve("bricks/observability/grafana");
     private static final String DATASOURCE_UID = "grafanacloud-prom";
     private static final Pattern KNOWN_METRICS = Pattern.compile(
             "app_build_info|app_backup_|http_server_requests_seconds|jvm_|hikaricp_|logback_events_total|process_|"

@@ -68,7 +68,7 @@ prometheus.remote_write "out" {
 	}
 }
 
-// Backup freshness. The backup sidecar (deploy/backup, profile `backup`) writes backup.prom into a volume mounted here
+// Backup freshness. The backup brick (bricks/backup) writes backup.prom into a volume mounted here
 // read-only. Without the sidecar the directory is empty or missing and nothing is exported, which is what the
 // BackupStale alert's noDataState=OK expects.
 prometheus.exporter.unix "backup" {
