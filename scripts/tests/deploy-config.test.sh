@@ -76,6 +76,9 @@ git -C "$root" check-ignore -q bricks/backup/rclone/rclone.conf || fail "bricks/
 # The minio brick extends app: endpoint env and a healthy-minio dependency.
 svc_block app <<<"$all" | grep -q 'APP_MINIO_ENDPOINT: http://minio:9000' || fail "app lacks APP_MINIO_ENDPOINT"
 svc_block app <<<"$all" | grep -qE '^ {6}minio:$' || fail "app does not depend on minio"
+# The partial-service merge must not drop the core app labels Watchtower relies on.
+grep -q 'com.centurylinklabs.watchtower.lifecycle.post-update:' <<<"$all" || fail "core app post-update label lost in the merge"
+svc_block app <<<"$all" | grep -q 'com.centurylinklabs.watchtower.enable: "true"' || fail "app lost its watchtower.enable label in the merge"
 # The rclone tokens live next to the Dockerfile: the build context must carry only what the image needs.
 [[ -f "$root/bricks/backup/.dockerignore" ]] || fail "bricks/backup has no .dockerignore (rclone tokens would enter the build context)"
 ctx="$(mktemp -d)"; mkdir -p "$ctx/rclone"; echo secret > "$ctx/rclone/rclone.conf"
