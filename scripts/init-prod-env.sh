@@ -5,7 +5,7 @@
 # generated on the host that uses them, never typed, pasted or committed. The script also derives the image name and
 # compose project name from the git remote, so the two values most likely to be mistyped never are.
 #
-# Every empty *PASSWORD= line in deploy/.env.prod.example (POSTGRES_PASSWORD, and any a brick added) gets a fresh value.
+# Every empty *PASSWORD= line in deploy/.env.prod.example (POSTGRES_PASSWORD and any password a brick adds) gets a fresh value.
 #
 # Usage: scripts/init-prod-env.sh [--force]     (or: make prod-init)
 set -euo pipefail
@@ -38,7 +38,7 @@ cat <<BANNER
 
       $target
 
-  It will contain a freshly generated value for every "*PASSWORD=" line (POSTGRES_PASSWORD and any a brick added)
+  It will contain a freshly generated value for every "*PASSWORD=" line (POSTGRES_PASSWORD and any password a brick adds)
   and is chmod 600. It is gitignored and must stay on this host.
 $( [[ "$force" == true ]] && printf '\n  --force: the existing file will be OVERWRITTEN and every generated password REPLACED.\n' )
   Derived from the git remote:
@@ -51,13 +51,22 @@ read -r -p "  Type 'yes' to continue: " answer
 
 umask 077
 # Every empty *PASSWORD= line in the example gets its own generated value: the core database password and whatever
-# an enabled brick asks for (bricks/README.md). Lines with a value are kept as they are.
-sed -e "s#^APP_IMAGE=.*#APP_IMAGE=${image}#" \
-    -e "s#^COMPOSE_PROJECT_NAME=.*#COMPOSE_PROJECT_NAME=${project}#" \
-    "$example" \
-| while IFS= read -r line; do
-    if [[ "$line" =~ ^([A-Z0-9_]*PASSWORD)=$ ]]; then printf '%s=%s\n' "${BASH_REMATCH[1]}" "$(openssl rand -hex 24)"; else printf '%s\n' "$line"; fi
-  done > "$target"
+# an enabled brick asks for (bricks/README.md). Lines with a value are kept as they are. The whole file is built in
+# memory first, so a failing openssl (set -e via pipefail) aborts before anything is written.
+content="$(
+  sed -e "s#^APP_IMAGE=.*#APP_IMAGE=${image}#" \
+      -e "s#^COMPOSE_PROJECT_NAME=.*#COMPOSE_PROJECT_NAME=${project}#" \
+      "$example" \
+  | while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" =~ ^([A-Z0-9_]*PASSWORD)=$ ]]; then
+        value="$(openssl rand -hex 24)" || { echo "openssl failed; no password generated, nothing written." >&2; exit 1; }
+        printf '%s=%s\n' "${BASH_REMATCH[1]}" "$value"
+      else
+        printf '%s\n' "$line"
+      fi
+    done
+)"
+printf '%s\n' "$content" > "$target"
 chmod 600 "$target"
 
 cat <<NEXT
