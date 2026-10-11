@@ -15,6 +15,7 @@ cp "$root/scripts/brick.sh" "$repo/scripts/"
 cat > "$repo/gradlew" <<'EOF'
 #!/usr/bin/env bash
 echo "$*" >> "$GRADLE_LOG"
+[[ "${GRADLE_FAIL:-0}" != 1 ]] || exit 1
 EOF
 chmod +x "$repo/gradlew"
 export GRADLE_LOG="$tmp/gradle.log"
@@ -104,6 +105,30 @@ if b remove demo >/dev/null 2>&1; then fail "second remove exited 0"; fi
 : > "$GRADLE_LOG"; b remove demo2 >/dev/null
 grep -q 'write-locks' "$GRADLE_LOG" && fail "lock refreshed for a brick without brick.gradle.kts"
 [[ "$(cat "$repo/.env.example")" == $'# Local defaults.\nAPP_NAME=x' ]] || fail ".env.example not restored: $(cat "$repo/.env.example")"
+
+# Brick names are validated before anything touches the filesystem.
+for bad in .. a/b release vps-db bricks Upper; do
+  if out="$(b add "$bad" 2>&1)"; then fail "add '$bad' exited 0"; fi
+  if out="$(b remove "$bad" 2>&1)"; then fail "remove '$bad' exited 0"; fi
+done
+grep -q 'brick name must match' <<<"$(b add .. 2>&1 || true)" || fail "no name-validation message for '..'"
+grep -q 'collides with a core skill' <<<"$(b add release 2>&1 || true)" || fail "no collision message for 'release'"
+grep -q 'bricks/' "$repo/compose.yml" && fail "a rejected name touched compose.yml"
+
+# A hand-edited .bricks without a final newline does not get the name glued onto its last line.
+printf '# comment' > "$repo/.bricks"
+b add demo2 >/dev/null
+[[ "$(cat "$repo/.bricks")" == $'# comment\ndemo2' ]] || fail ".bricks glued: $(cat "$repo/.bricks")"
+b remove demo2 >/dev/null
+
+# A lockfile failure leaves the brick in place, says how to continue, and a retry of the printed command works.
+if out="$(GRADLE_FAIL=1 b add demo 2>&1)"; then fail "add exited 0 although the lockfile refresh failed"; fi
+grep -q 'make lock' <<<"$out" || fail "add failure does not mention make lock: $out"
+grep -qx 'demo' "$repo/.bricks" || fail ".bricks lost demo after a failed lock refresh"
+if out="$(GRADLE_FAIL=1 b remove demo 2>&1)"; then fail "remove exited 0 although the lockfile refresh failed"; fi
+grep -q 'make lock' <<<"$out" || fail "remove failure does not mention make lock: $out"
+grep -qx 'demo' "$repo/.bricks" && fail ".bricks still lists demo after remove"
+[[ ! -e "$f" ]] || fail "remove failure left copied java behind"
 
 # The CI matrix is static; once the bricks job exists every brick directory must be in it.
 if grep -q '^  bricks:' "$root/.github/workflows/ci.yml"; then

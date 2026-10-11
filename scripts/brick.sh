@@ -107,6 +107,11 @@ has_java() { [[ -d "bricks/$1/java" ]]; }
 refresh_lock() { "$gradle" ":${service}:dependencies" --write-locks -q && echo "  ~ $service_dir/gradle.lockfile refreshed"; }
 format_java() { "$gradle" ":${service}:spotlessApply" -q && echo "  ~ copied Java formatted"; }
 
+check_name() { # brick
+  [[ "$1" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "brick name must match ^[a-z0-9][a-z0-9-]*\$"
+  case "$1" in release|vps-db|bricks) die "brick name '$1' collides with a core skill" ;; esac
+}
+
 # --- commands -------------------------------------------------------------------------------------------------------
 cmd_list() {
   local d b mark desc
@@ -121,6 +126,7 @@ cmd_list() {
 
 cmd_add() {
   local b="$1"
+  check_name "$b"
   [[ -d "bricks/$b" ]] || die "unknown brick '$b' (make bricks lists them)"
   if enabled "$b"; then echo "brick '$b' is already enabled; nothing to do"; return 0; fi
   echo "Adding brick '$b':"
@@ -131,14 +137,18 @@ cmd_add() {
   each_file "$b" java main copy_one; each_file "$b" java test copy_one
   each_file "$b" resources main copy_one; each_file "$b" resources test copy_one
   if [[ -f "bricks/$b/skill/SKILL.md" ]]; then mkdir -p ".claude/skills/$b"; cp "bricks/$b/skill/SKILL.md" ".claude/skills/$b/SKILL.md"; echo "  + .claude/skills/$b/SKILL.md"; fi
+  [[ -s "$bricks_file" && $(tail -c1 "$bricks_file" | wc -l) -eq 0 ]] && echo >> "$bricks_file"
   echo "$b" >> "$bricks_file"; echo "  ~ $bricks_file: + $b"
-  [[ -f "bricks/$b/brick.gradle.kts" ]] && refresh_lock
+  if [[ -f "bricks/$b/brick.gradle.kts" ]]; then
+    refresh_lock || die "lockfile refresh failed; the brick's files are in place: fix the cause, then: make lock && make format"
+  fi
   has_java "$b" && format_java
   echo "Enabled '$b'. Read bricks/$b/README.md, then: make build && make test-scripts"
 }
 
 cmd_remove() {
   local b="$1"
+  check_name "$b"
   [[ -d "bricks/$b" ]] || die "unknown brick '$b' (make bricks lists them)"
   enabled "$b" || die "brick '$b' is not enabled"
   echo "Removing brick '$b':"
@@ -150,7 +160,9 @@ cmd_remove() {
   each_file "$b" resources main delete_one; each_file "$b" resources test delete_one
   if [[ -f "bricks/$b/skill/SKILL.md" ]]; then rm -rf ".claude/skills/$b"; echo "  - .claude/skills/$b/"; fi
   sed -i "/^${b}\$/d" "$bricks_file"; echo "  ~ $bricks_file: - $b"
-  [[ -f "bricks/$b/brick.gradle.kts" ]] && refresh_lock
+  if [[ -f "bricks/$b/brick.gradle.kts" ]]; then
+    refresh_lock || die "lockfile refresh failed; the brick is already removed: fix the cause, then: make lock"
+  fi
   echo "Disabled '$b'. Then: make build && make test-scripts"
 }
 
