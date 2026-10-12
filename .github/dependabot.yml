@@ -4,7 +4,9 @@
 version: 2
 updates:
   - package-ecosystem: gradle
-    directory: /services/app
+    directories:
+      - /services/app
+      - "/bricks/*/java"
     schedule:
       interval: weekly
       day: monday
