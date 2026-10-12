@@ -1,4 +1,4 @@
-package __PKG__.unit;
+package template.bricks.observability;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 class DashboardJsonTest {
 
     private static final Path GRAFANA_DIR =
-            Path.of(System.getProperty("repo.root", "../..")).resolve("bricks/observability/grafana");
+            Path.of(System.getProperty("repo.root", "../../..")).resolve("bricks/observability/grafana");
     private static final String DATASOURCE_UID = "grafanacloud-prom";
     private static final Pattern KNOWN_METRICS = Pattern.compile(
             "app_build_info|app_backup_|http_server_requests_seconds|jvm_|hikaricp_|logback_events_total|process_|"
