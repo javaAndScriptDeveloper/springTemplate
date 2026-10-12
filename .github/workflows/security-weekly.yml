@@ -55,7 +55,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          skip-dirs: build,.gradle
+          skip-dirs: "**/build,**/.gradle"
           scanners: vuln,secret,misconfig
           severity: HIGH,CRITICAL
           exit-code: "1"

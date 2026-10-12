@@ -10,8 +10,8 @@
 # Only Caddy publishes ports (80/443). Postgres listens on the loopback interface for SSH tunnels. The management
 # port (8081) is neither published nor proxied.
 #
-# Memory budget (mem_limit): caddy 64m + app 2×512m + db 384m + watchtower 48m + backup 64m + alloy 128m ≈ 1.7 GB,
-# which fits a 4 GB VPS with room for the OS. Re-check this sum whenever a service is added or a limit raised.
+# Memory budget (mem_limit): caddy 64m + app 2×512m + db 384m + watchtower 48m ≈ 1.5 GB; every brick's README states
+# what it adds. Re-check this sum whenever a service is added or a limit raised.
 
 name: ${COMPOSE_PROJECT_NAME:?run make prod-init (sets COMPOSE_PROJECT_NAME from the git remote)}
 
@@ -150,76 +150,6 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 
-  backup:
-    # Enabled by COMPOSE_PROFILES=backup in deploy/.env.prod; uploads pg_dump to an rclone remote (docs/deployment.md
-    # §6). No :? guards on the backup variables: compose interpolates profiled services even when the profile is off.
-    profiles: ["backup"]
-    build: ./backup
-    image: ${COMPOSE_PROJECT_NAME}-backup:local
-    # Built on the host, never pulled: Watchtower must not look for it in a registry.
-    pull_policy: build
-    restart: unless-stopped
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      POSTGRES_DB: ${POSTGRES_DB:-app}
-      POSTGRES_USER: ${POSTGRES_USER:-app}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run make prod-init (generates POSTGRES_PASSWORD)}
-      RCLONE_REMOTE: ${RCLONE_REMOTE:-}
-      RCLONE_CONFIG: /config/rclone/rclone.conf
-      BACKUP_CRON: ${BACKUP_CRON:-0 */6 * * *}
-      TZ: ${BACKUP_TZ:-UTC}
-      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
-      BACKUP_MAX_AGE_HOURS: ${BACKUP_MAX_AGE_HOURS:-12}
-    volumes:
-      # A directory, read-write: rclone saves refreshed OAuth tokens (Google Drive) by writing a new file and renaming
-      # it over rclone.conf, which a single-file bind mount rejects. Must exist on the host.
-      - type: bind
-        source: ${RCLONE_CONFIG_DIR:-./backup/rclone}
-        target: /config/rclone
-        bind:
-          create_host_path: false
-      # Shared by the scheduler and every `docker compose run --rm backup …`, so they cannot overlap.
-      - backup_lock:/var/lock/backup
-      # Read by Alloy (textfile collector) for the BackupStale alert.
-      - backup_metrics:/metrics
-    networks: [data]
-    mem_limit: 64m
-    logging: *default-logging
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"
-
-  alloy:
-    # Enabled by COMPOSE_PROFILES=observability in deploy/.env.prod. No :? guards on purpose: compose interpolates
-    # every service even when its profile is inactive, and a stack without Grafana Cloud must still start.
-    profiles: ["observability"]
-    image: grafana/alloy:v1.10.0
-    restart: unless-stopped
-    command:
-      - run
-      - --server.http.listen-addr=0.0.0.0:12345
-      - --storage.path=/var/lib/alloy/data
-      - /etc/alloy/config.alloy
-    volumes:
-      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
-      - alloy_data:/var/lib/alloy/data
-      # The backup sidecar's backup.prom (empty when the backup profile is off).
-      - backup_metrics:/metrics/backup:ro
-    environment:
-      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL:-}
-      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER:-}
-      GRAFANA_CLOUD_PROM_TOKEN: ${GRAFANA_CLOUD_PROM_TOKEN:-}
-      # Docker's embedded DNS answers `app` with every replica's address.
-      APP_METRICS_HOST: app
-      APP_METRICS_PORT: "8081"
-      APP_ENV: ${APP_ENV:-prod}
-    networks: [edge]
-    mem_limit: 128m
-    logging: *default-logging
-    labels:
-      com.centurylinklabs.watchtower.enable: "false"
-
 networks:
   # Only `app` joins both: a compromised proxy cannot reach the database.
   edge:
@@ -229,6 +159,3 @@ volumes:
   postgres_data:
   caddy_data:
   caddy_config:
-  alloy_data:
-  backup_lock:
-  backup_metrics:

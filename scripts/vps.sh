@@ -20,7 +20,6 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-compose_file="deploy/compose.prod.yml"
 env_file="deploy/.env.prod"
 
 # .env fills in whatever the environment did not provide; never overrides it.
@@ -44,7 +43,8 @@ local_port="${VPS_DB_LOCAL_PORT:-15432}"
 
 remote() { ssh "$VPS_SSH" "cd $app_dir && $*"; }
 remote_env() { ssh "$VPS_SSH" "cat $app_dir/$env_file"; }
-prod() { remote "docker compose -f $compose_file --env-file $env_file $*"; }
+# Runs the compose command the Makefile builds (core file plus every enabled brick's override.prod.yml), on the host.
+prod() { remote "eval \"\$(make -s --no-print-directory print-prod) $*\""; }
 env_value() { # KEY DEFAULT
   local v; v="$(printf '%s\n' "$REMOTE_ENV" | grep -E "^$1=" | head -n1 | cut -d= -f2- || true)"
   # One pair of surrounding quotes is compose syntax (KEY="a,b"), not part of the value.
@@ -70,17 +70,16 @@ case "$cmd" in
     prod ps ;;
 
   logs)
-    prod logs -f --tail=200 "${1:-}" ;;
+    prod logs -f --tail=200 ${1:+"$1"} ;;
 
   deploy-status)
     prod "ps --format '{{.Service}} {{.Image}} {{.Status}}'" | grep -E '^app ' || true
     load_remote_env
     domain="$(env_value DOMAIN "")"
     [[ -n "$domain" ]] && { echo "https://${domain}/version →"; curl -fsS --max-time 10 "https://${domain}/version" || true; echo; }
-    profiles="$(env_value COMPOSE_PROFILES "")"
-    if [[ ",${profiles// /}," != *",backup,"* ]]; then
-      echo "backups: DISABLED (COMPOSE_PROFILES lacks backup; docs/deployment.md §6)"
-    elif status_out="$(prod "--profile backup run --rm -T backup status" 2>/dev/null)"; then
+    if ! remote "cat .bricks 2>/dev/null" | sed -e 's/#.*//' -e 's/[[:space:]]*$//' | grep -qx backup; then
+      echo "backups: brick off (make add BRICK=backup; bricks/backup/README.md)"
+    elif status_out="$(prod "run --rm -T backup status" 2>/dev/null)"; then
       echo "backups: ok — ${status_out//$'\n'/; }"
     else
       status_out="${status_out//$'\n'/; }"
@@ -88,7 +87,7 @@ case "$cmd" in
     fi ;;
 
   backup-status)
-    prod "--profile backup run --rm -T backup status" ;;
+    prod "run --rm -T backup status" ;;
 
   tunnel)
     load_remote_env

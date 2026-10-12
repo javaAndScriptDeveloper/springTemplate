@@ -1,0 +1,2 @@
+# Enabled bricks, one per line. `make bricks` lists them, `make add BRICK=<name>` / `make remove BRICK=<name>`
+# edit this file. See bricks/README.md.

@@ -43,8 +43,10 @@ while IFS= read -r subject; do
   if [[ "$subject" =~ $major_re ]]; then bump="major"; break; fi
   if [[ "$subject" =~ $minor_re ]]; then bump="minor"; fi
 done < <(g log --format=%s "$range")
-if [[ "$bump" != "major" ]] && g log --format=%b "$range" | grep -q '^BREAKING CHANGE:'; then
-  bump="major"
+if [[ "$bump" != "major" ]]; then
+  # Captured first: grep -q exiting early would SIGPIPE git log, and pipefail would read that as "no match".
+  bodies="$(g log --format=%b "$range")"
+  if grep -q '^BREAKING CHANGE:' <<<"$bodies"; then bump="major"; fi
 fi
 
 IFS=. read -r major minor patch <<< "$current"

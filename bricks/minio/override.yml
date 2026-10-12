@@ -1,0 +1,13 @@
+# minio brick, local: the app's side of the wiring. A partial of a core service cannot live in compose.yml:
+# Compose merges partials across -f files (the Makefile adds this one while the brick is enabled), not across
+# include, and Compose < 5 rejects an included service that already exists in the parent.
+services:
+  app:
+    environment:
+      APP_MINIO_ENDPOINT: http://minio:9000
+      APP_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      APP_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      APP_MINIO_BUCKET: ${APP_MINIO_BUCKET:-app}
+    depends_on:
+      minio:
+        condition: service_healthy

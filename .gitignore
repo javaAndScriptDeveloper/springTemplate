@@ -24,6 +24,9 @@ Thumbs.db
 .env.local
 deploy/.env.prod
 deploy/backups/
+bricks/backup/rclone/*
+!bricks/backup/rclone/.gitkeep
+# old layout; remove after every host has migrated
 deploy/backup/rclone/
 *.log
 

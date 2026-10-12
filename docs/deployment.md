@@ -18,8 +18,8 @@ the rule that makes rolling deploys safe.
 ```bash
 git clone https://github.com/<owner>/<repo>.git && cd <repo>
 make prod-init           # deploy/.env.prod, mode 600, generated POSTGRES_PASSWORD
-$EDITOR deploy/.env.prod # DOMAIN, ACME_EMAIL; optional Grafana Cloud block + COMPOSE_PROFILES=observability
-make prod-up             # `compose config -q` first: every :? guard fires here, not after the stack is down
+$EDITOR deploy/.env.prod # DOMAIN, ACME_EMAIL (+ the env of any enabled brick)
+make prod-up             # `compose config -q` first: every :? guard fires here, not after the stack is down (+ bricks)
 make prod-ps
 ```
 
@@ -30,7 +30,7 @@ packages need nothing.
 ## 3. What healthy looks like
 
 ```bash
-make prod-ps                        # app ×2 healthy, caddy/db/watchtower/backup up
+make prod-ps                        # app ×2 healthy, caddy/db/watchtower up (plus each enabled brick's services)
 make prod-logs SERVICE=watchtower   # "Scanned=1 Updated=0 Failed=0" once per poll: label scoping works
 curl -s https://$DOMAIN/version     # {"version":"1.4.2","revision":"<sha>"}
 curl -s -o /dev/null -w '%{http_code}\n' https://$DOMAIN/actuator/health   # 404: actuator is not exposed
@@ -83,87 +83,31 @@ Liquibase's `DATABASECHANGELOGLOCK` serialises the two replicas at boot, so a mi
 
 ## 6. Backups and restore
 
-Backups are **off until you configure them** and never stay on the VPS. The `backup` service (compose profile
-`backup`) runs `pg_dump -Fc` on `BACKUP_CRON` (every 6 h) and uploads it with [rclone](https://rclone.org) to a remote
-you choose. A dump on the same disk as the database does not survive losing that disk, so there is no local mode.
+Off-host database backups are the `backup` brick: setup, status, restore and the invariants are in
+[`bricks/backup/README.md`](../bricks/backup/README.md). Without the brick there are no backups.
 
-### Enable
+### Adding or removing a brick on a running host
 
-1. Pick a remote; anything rclone supports works. Two cheap ones:
-   - **Google Drive** (15 GB free): on your **laptop** (it opens a browser) run `rclone config` → `n` → name `gdrive`
-     → storage `drive` → scope `drive.file` → finish the browser login.
-   - **Hetzner Storage Box** (≈ €4/month, same data centre, no browser): storage `sftp`, host
-     `uXXXXX.your-storagebox.de`, port `23`, user `uXXXXX`, an SSH key or password.
-2. Copy the config to the VPS and lock it down (it holds the remote's credentials):
-   `ssh <vps> 'mkdir -p <repo>/deploy/backup/rclone && chmod 700 <repo>/deploy/backup/rclone'`, then
-   `scp ~/.config/rclone/rclone.conf <vps>:<repo>/deploy/backup/rclone/rclone.conf && ssh <vps> chmod 600 <repo>/deploy/backup/rclone/rclone.conf`.
-   The container mounts the directory, not the file: rclone saves refreshed tokens by renaming a new file over
-   `rclone.conf`, which a single-file mount rejects.
-3. In `deploy/.env.prod`: add `backup` to `COMPOSE_PROFILES` (e.g. `COMPOSE_PROFILES=backup,observability`) and set
-   `RCLONE_REMOTE=gdrive:<service-name>`. Optional: `BACKUP_CRON`, `BACKUP_TZ`, `BACKUP_RETENTION_DAYS` (30),
-   `BACKUP_MAX_AGE_HOURS` (12).
-4. `make prod-up`. If the remote or Postgres is unreachable the container exits with the reason:
-   `make prod-logs SERVICE=backup`.
-5. `make prod-backup-now`, then `make prod-backup-list`: the new stamp must be listed. Look at the remote once too.
+`make add BRICK=<name>` on your laptop, commit, push. On the VPS **right after the push**: `git pull`, copy the
+brick's block from `deploy/.env.prod.example` into `deploy/.env.prod` (generate any password with
+`openssl rand -hex 24`), `make prod-up`. Do the VPS steps right after the push: the old image tolerates the new env, and
+the new image then rolls into a host that already has the brick. Otherwise Watchtower rolls the new image (about 5
+minutes after the push) onto a host without the brick's services; a brick with Java then falls back to its defaults
+(minio: `localhost:9000`), its health indicator reports DOWN and both replicas go unhealthy while `/version` still
+answers. Never run `make add` on the VPS: it edits tracked files and runs Gradle. Removing: `make remove`, commit,
+push, then `git pull` and `make prod-up` (it passes `--remove-orphans`) on the VPS; the brick's README lists leftovers.
 
-Upgrading from the old local backups: once step 5 works, delete `deploy/backups/` by hand. If you do **not** enable
-backups, the old always-on `backup` container keeps running after `make prod-up` (compose does not treat a service
-that moved behind a profile as an orphan); remove it with
-`docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod rm -sf backup`.
+### Upgrading a host from the COMPOSE_PROFILES layout
 
-### Disable
+Hosts set up before bricks have `COMPOSE_PROFILES=backup,observability` and `RCLONE_CONFIG_DIR=./backup/rclone` in
+`deploy/.env.prod`; `make prod-up --remove-orphans` on the new layout would remove `backup` and `alloy`, stopping
+backups and the `BackupStale` alert with them. Migrate first:
 
-Remove `backup` from `COMPOSE_PROFILES`, stop the container with
-`docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod rm -sf backup`, then delete its last metric —
-otherwise Alloy keeps exporting the frozen timestamp and `BackupStale` fires forever:
-`docker run --rm -v <COMPOSE_PROJECT_NAME>_backup_metrics:/m alpine rm -f /m/backup.prom` (or stop `alloy` and
-`docker volume rm <COMPOSE_PROJECT_NAME>_backup_metrics`).
-
-### What is on the remote
-
-```
-postgres/<stamp>.dump       pg_dump --format=custom, one per successful run
-pre-restore/<stamp>.dump    the database as it was just before a restore
-last-success                stamp of the last fully successful run
-```
-
-Stamps are UTC (`20260928T060000Z`). After a successful run, dumps older than `BACKUP_RETENTION_DAYS` are pruned
-from `postgres/` and `pre-restore/`; a failed run prunes nothing.
-
-### Is it working?
-
-```bash
-make prod-backup-status     # on the VPS: last success and its age, non-zero beyond BACKUP_MAX_AGE_HOURS
-make vps-backup-status      # the same from your laptop; `make vps-status` prints a one-line summary
-```
-
-With the observability profile on, the `BackupStale` alert fires after 12 h without a successful backup
-([observability.md](observability.md)). Its threshold is in `deploy/grafana/alerting/rules.json`; change it together
-with `BACKUP_MAX_AGE_HOURS`.
-
-### Restore
-
-```bash
-make prod-backup-list                  # stamps, oldest first
-make prod-restore STAMP=latest         # or a stamp from the list; asks you to type yes
-```
-
-Stops the app replicas (and Watchtower, only if it was running) — if reading container state or stopping them fails,
-nothing is restored and whatever was stopped is started again — then uploads a dump of the **current** database to
-`pre-restore/`, replaces the whole `public` schema with the dump's in one transaction (a failure leaves the database
-unchanged), then starts everything again either way; a failed restore still leaves the command exiting non-zero.
-`latest` means the last *successful* run, never merely the newest file. Tables created after the dump are gone
-afterwards — the database is exactly what it was at the dump, including its `databasechangelog` — and the app's
-Liquibase migrates it forward from there when it starts.
-
-To undo a restore, copy the safety dump back into `postgres/` and restore it:
-`docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod --profile backup run --rm --entrypoint rclone backup copyto "$RCLONE_REMOTE/pre-restore/<stamp>.dump" "$RCLONE_REMOTE/postgres/<stamp>.dump"`
-(with `RCLONE_REMOTE` exported in your shell), then `make prod-restore STAMP=<stamp>`.
-
-On a **new host**: `make prod-init`, copy `rclone.conf` and fill `.env.prod` as above but leave `backup` **out** of
-`COMPOSE_PROFILES`, `make prod-up`, `make prod-backup-list`, `make prod-restore STAMP=<the stamp you want>` (an
-explicit stamp, not `latest`), then add `backup` to `COMPOSE_PROFILES` and `make prod-up` again. A scheduler running
-before the restore could back up the new, empty database and make it `latest` — and start pruning towards it.
+1. On the laptop: `make add BRICK=backup` and `make add BRICK=observability` (those you used), commit, push.
+2. On the VPS: `git pull`.
+3. `mv deploy/backup/rclone/rclone.conf bricks/backup/rclone/`
+4. In `deploy/.env.prod`: set `RCLONE_CONFIG_DIR=./rclone`, delete the `COMPOSE_PROFILES` line.
+5. `make prod-up`, then `make prod-backup-now`.
 
 ## 7. Memory budget
 
@@ -173,9 +117,7 @@ before the restore could back up the new, empty database and make it `latest` �
 | app × 2 | 512 MB each (`APP_MEM_LIMIT`) | JVM heap ≤ 75 % via `JAVA_TOOL_OPTIONS`; exits on OOM so Docker restarts it |
 | db | 384 MB | `shared_buffers=128MB`, `max_connections=50` ≥ `APP_REPLICAS × DB_POOL_SIZE` + tools |
 | watchtower | 48 MB | |
-| backup | 64 MB | only with `COMPOSE_PROFILES=backup` |
-| alloy | 128 MB | only with `COMPOSE_PROFILES=observability` |
-| **total** | **≈ 1.7 GB** | fits a 4 GB VPS with headroom for the OS and page cache |
+| **total** | **≈ 1.5 GB** | core only; brick services: see each brick's README. Fits a 4 GB VPS with headroom for the OS and page cache |
 
 Re-do this sum when adding a service or raising a limit.
 
@@ -184,6 +126,7 @@ Re-do this sum when adding a service or raising a limit.
 | Task | Command (on the VPS) |
 |---|---|
 | Status / logs | `make prod-ps`, `make prod-logs SERVICE=app` |
+| Validate env and compose (every `:?` guard, brick overrides) | `make prod-config` |
 | Pull now instead of waiting for Watchtower | `make prod-pull` |
 | Stop everything (volumes kept) | `make prod-down` |
 | Database shell | from your machine: `make vps-psql`; on the VPS: `docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod exec db psql -U app app` |
