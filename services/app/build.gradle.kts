@@ -95,7 +95,7 @@ dependencies {
     testImplementation("org.testcontainers:postgresql")
 
     // Random, fully-populated test objects — the project convention over hand-built fixtures
-    testImplementation("org.instancio:instancio-junit:5.4.1")
+    testImplementation("org.instancio:instancio-junit:6.1.0")
     // Architecture rules enforced as tests (layering, naming, no field injection)
     testImplementation("com.tngtech.archunit:archunit-junit5:1.4.2")
 
