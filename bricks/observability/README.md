@@ -11,7 +11,7 @@ stack → Prometheus → *Send metrics*) and `make prod-up`. Memory: alloy 128m.
   breakers), `grafana/alerting/rules.json` (ServiceDown, 5xx > 5 %, DB connections pending, heap > 90 %,
   BackupStale), Telegram contact point. CI (`.github/workflows/dashboards.yml`) pushes them on merge when
   `GRAFANA_URL` + `GRAFANA_API_TOKEN` exist; alerts only when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` exist too.
-- `DashboardJsonTest` (copied into the service) keeps the JSON honest.
+- `DashboardJsonTest` (Gradle project `:bricks:observability`) keeps the JSON honest.
 
 ## Invariants
 - Metric names `app.<area>.<thing>`, low-cardinality tags only.
@@ -49,7 +49,7 @@ Cloud receives it from CI. Datasource uid is `grafanacloud-prom` in both places,
 make observability-up && make run   # http://localhost:3000, anonymous admin
 # edit panels in the UI …
 make grafana-pull                   # writes the UI state back to the JSON (id/version stripped)
-./gradlew test --tests '*DashboardJsonTest'
+./gradlew :bricks:observability:test
 git commit -am "feat(grafana): add cache hit ratio panel"   # CI pushes to Grafana Cloud on merge
 ```
 

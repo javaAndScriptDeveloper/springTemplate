@@ -10,8 +10,8 @@ Enabling on a running host: do the VPS steps (`git pull`, `.env.prod` block, `ma
 `localhost:9000`, `minio` health is DOWN, replicas go unhealthy and uploads fail until the host catches up.
 
 ## Use it
-`ObjectStorageService` (`service/`): `put(key, bytes, contentType)`, `get(key)` → 404 `ApplicationException` when
-missing, `delete(key)`, `presignedGetUrl(key, ttl)`. One bucket (`APP_MINIO_BUCKET`, created on first use); prefix
+`template.bricks.minio.ObjectStorageService`: `put(key, bytes, contentType)`, `get(key)` → 404
+`ResponseStatusException` when missing, `delete(key)`, `presignedGetUrl(key, ttl)`. One bucket (`APP_MINIO_BUCKET`, created on first use); prefix
 keys per feature. Settings: `MinioProperties`, env `APP_MINIO_ENDPOINT / ACCESS_KEY / SECRET_KEY / BUCKET / REGION`.
 
 ## Operate it
@@ -28,12 +28,16 @@ keys per feature. Settings: `MinioProperties`, env `APP_MINIO_ENDPOINT / ACCESS_
   `bricks/minio/compose.prod.yml` (or remove the brick and keep the Java).
 
 ## Tests
-Unit: `ObjectStorageServiceTest` (mocked `S3Client`). Integration: `ObjectStorageIntegrationTest` against a
-Testcontainers MinIO (`@Import(MinioTestcontainersConfiguration.class)`).
+Gradle project `:bricks:minio` (`./gradlew :bricks:minio:test`). Unit: `ObjectStorageServiceTest` (mocked
+`S3Client`). Integration: `ObjectStorageIntegrationTest` against a Testcontainers MinIO, in a minimal context
+(`MinioTestApplication`), so the auto-configuration must wire itself.
 
 ## Change it
-Dependencies: `brick.gradle.kts` (bump the AWS SDK by hand; Dependabot does not read brick files). A second
-module using awssdk should move both to the AWS SDK BOM.
+The Java is the Gradle project `:bricks:minio` (`bricks/minio/java`, package `template.bricks.minio`). Override any
+bean (`S3Client`, `S3Presigner`, `ObjectStorageService`, `MinioHealthIndicator`) by defining your own. Dependencies:
+`java/build.gradle.kts`; Dependabot bumps them, then refresh the lockfile with
+`./gradlew :bricks:minio:dependencies --write-locks`. A second module using awssdk should move both to the AWS SDK
+BOM.
 
 Image: MinIO Inc. stopped publishing community images (`minio/minio` is no longer pullable), so the brick uses
 Chainguard's build, `cgr.dev/chainguard/minio:latest`. Only `latest` exists on the free tier; to get reproducible

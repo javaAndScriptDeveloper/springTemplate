@@ -19,9 +19,8 @@ wires it in, `make remove BRICK=<name>` takes it out without residue, `make bric
 | `compose.prod.yml` | `include:` entry in `deploy/compose.prod.yml`. Reaches a running host only via `git pull`, the `.env.prod` block and `make prod-up` ([deployment.md](../docs/deployment.md)); brick Java must boot and degrade when its service is absent (minio does; only its health flips). |
 | `env.example` / `env.prod.example` | Block appended to `.env.example` / `deploy/.env.prod.example` between `# --- brick:<name> ---` and `# --- /brick:<name> ---`. An empty `X_PASSWORD=` line is filled by `make prod-init`. |
 | `Makefile` | Included by the root Makefile while enabled (nothing is copied). Convention: start with `# --- brick: <name>`; use `##` help comments; may use `PROD`, `ENV_FILE`, `SERVICE`. |
-| `brick.gradle.kts` | Applied to the service build while enabled; `add`/`remove` refresh `services/app/gradle.lockfile`. Use `"implementation"("…")` (string-invoked; no type-safe accessors). |
-| `java/main/**`, `java/test/**` | Copied under `services/app/src/{main,test}/java/<package>/…`; `__PKG__` → the service package. Spotless runs on add when the brick has `java/`. |
-| `resources/main/**`, `resources/test/**` | Copied under `services/app/src/{main,test}/resources/`. |
+| `brick.gradle.kts` | Applied to the service build while enabled; `add`/`remove` refresh `services/app/gradle.lockfile`. Use `"implementation"(project(":bricks:<name>"))` to depend on the brick's Java (string-invoked; no type-safe accessors). |
+| `java/` | Gradle project `:bricks:<name>` (`java/build.gradle.kts`, `java/gradle.lockfile`, `java/src/{main,test}/…`), included by `settings.gradle.kts` while enabled; nothing is copied. Package `template.bricks.<name>`. Register beans via `META-INF/spring/org.springframework.boot.autoconfigure.AutoConfiguration.imports`, each `@ConditionalOnMissingBean` so the app can override. Never import app classes; use `ResponseStatusException` for HTTP errors. Refresh the lockfile with `./gradlew :bricks:<name>:dependencies --write-locks`. |
 | `skill/SKILL.md` | Copied to `.claude/skills/<name>/SKILL.md`; `remove` deletes that folder. |
 | `tests/*.test.sh` | Run by `make test-scripts` always. Test the brick's own scripts in isolation (`BRICKS=<name>` on make). |
 | anything else | Stays put; reference it from the brick's compose files by relative path. |
@@ -48,7 +47,8 @@ block-sequence `include:` with two-space `  - ` entries in the root compose file
 1. `mkdir bricks/<name>`; write `README.md` first (what, why, how, env, memory, invariants).
 2. Compose fragments; `scripts/tests/deploy-config.test.sh` renders all bricks together, so add your prod services to
    its service lists.
-3. Env blocks, Makefile, Gradle, Java with `__PKG__`, skill, tests.
+3. Env blocks, Makefile, `brick.gradle.kts`, the `java/` project (own build file + lockfile, auto-configuration, no app
+   imports), skill, tests.
 4. Add the name to the `bricks` matrix in `.github/workflows/ci.yml` (`scripts/tests/brick.test.sh` checks this).
 5. `make add BRICK=<name> && make build && make test-scripts && make remove BRICK=<name> && git status --porcelain`
    (empty).

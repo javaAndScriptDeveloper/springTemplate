@@ -11,10 +11,10 @@ git -C "$root" archive "$(git -C "$root" write-tree)" | tar -x -C "$tmp"
 # Working-tree versions of the script under test and its inputs, so an uncommitted fix is what gets tested.
 cp "$root/scripts/rename-package.sh" "$tmp/scripts/"
 cp "$root/scripts/tests/rename-package.test.sh" "$tmp/scripts/tests/"
-# Bricks carry __PKG__ placeholders resolved by scripts/brick.sh at add time: rename must leave them alone, while a
-# brick class already copied into the service is moved like any other class.
+# Brick Java lives in its own fixed package (template.bricks.<name>): rename must leave it alone, while a class
+# of the service is moved.
 mkdir -p "$tmp/bricks/demo/java/main/config"
-printf 'package __PKG__.config;\n\npublic class DemoConfig {}\n' > "$tmp/bricks/demo/java/main/config/DemoConfig.java"
+printf 'package template.bricks.config;\n\npublic class DemoConfig {}\n' > "$tmp/bricks/demo/java/main/config/DemoConfig.java"
 printf 'package com.example.company.config;\n\npublic class CopiedBrickConfig {}\n' \
   > "$tmp/services/app/src/main/java/com/example/company/config/CopiedBrickConfig.java"
 git -C "$tmp" init -q -b main; git -C "$tmp" -c user.email=t@t -c user.name=t add -A >/dev/null
@@ -39,7 +39,7 @@ grep -q '^APP_NAME=shop$' "$tmp/.env.example" || fail "APP_NAME not set in .env.
 grep -q 'group = "com.acme.shop"' "$tmp/services/app/build.gradle.kts" || fail "gradle group not set"
 grep -q 'com/acme/shop/Application.class' "$tmp/services/app/build.gradle.kts" || fail "coverage exclusions not rewritten"
 [[ -f "$tmp/services/app/src/main/java/com/acme/shop/config/CopiedBrickConfig.java" ]] || fail "copied brick class not moved"
-grep -q '^package __PKG__.config;' "$tmp/bricks/demo/java/main/config/DemoConfig.java" || fail "rename touched bricks/"
+grep -q '^package template.bricks.config;' "$tmp/bricks/demo/java/main/config/DemoConfig.java" || fail "rename touched bricks/"
 
 # The script's own tests and the historical design docs keep the old name; rewriting them breaks CI after a rename.
 untouched="$(git -C "$tmp" status --porcelain -- scripts/tests docs/superpowers)"

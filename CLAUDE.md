@@ -50,8 +50,8 @@ locally. Read-only unless the user asked for a specific change; never fix schema
 
 ## Bricks
 
-`.bricks` lists enabled bricks. `make add BRICK=<name>` wires `bricks/<name>/` in (compose include, env blocks, Java
-copied into the service, skill, lockfile); `make remove` reverses it. Read `bricks/<name>/README.md` before touching a
+`.bricks` lists enabled bricks. `make add BRICK=<name>` wires `bricks/<name>/` in (compose include, env blocks, skill,
+lockfile; its Java is a Gradle subproject `:bricks:<name>` while enabled); `make remove` reverses it. Read `bricks/<name>/README.md` before touching a
 brick, `bricks/README.md` before authoring one. Skill: `.claude/skills/bricks/SKILL.md`. Observability (Grafana,
 alerts, dashboard) and backups are bricks; their invariants live in their READMEs.
 
