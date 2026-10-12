@@ -40,6 +40,8 @@ dependencyManagement {
 dependencies {
     compileOnly("org.projectlombok:lombok")
     annotationProcessor("org.projectlombok:lombok")
+    // AWS SDK classes carry Jackson 2 annotations (@JsonInclude); without them javac warns "unknown enum constant".
+    compileOnly("com.fasterxml.jackson.core:jackson-annotations")
 
     // S3Client and S3Presigner appear in the public beans, so consumers see the SDK.
     api("software.amazon.awssdk:s3:2.46.7")
