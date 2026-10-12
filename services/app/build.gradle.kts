@@ -33,6 +33,12 @@ extra["springCloudVersion"] = "2025.1.2"
 // once the BOM catches up; `./gradlew dependencyInsight --dependency <name>` shows what is in effect.
 extra["tomcat.version"] = "11.0.26"
 extra["postgresql.version"] = "42.7.12"
+// Jackson 3 and Jackson 2 BOMs (Boot 4.1.0 manages 3.1.4 / 2.21.4).
+extra["jackson-bom.version"] = "3.1.7"
+extra["jackson-2-bom.version"] = "2.21.7"
+extra["netty.version"] = "4.2.17.Final"
+extra["httpcore5.version"] = "5.4.3"
+extra["spring-framework.version"] = "7.0.9"
 
 dependencies {
     // Lombok

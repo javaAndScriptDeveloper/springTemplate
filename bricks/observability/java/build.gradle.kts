@@ -21,6 +21,11 @@ dependencyLocking {
     lockAllConfigurations()
 }
 
+// Security bumps ahead of the Boot BOM (trivy fails the build on fixable HIGH/CRITICAL CVEs). Drop each override
+// once the BOM catches up; `./gradlew :bricks:observability:dependencyInsight --dependency jackson-core` shows what is in effect.
+extra["jackson-bom.version"] = "3.1.7"
+extra["jackson-2-bom.version"] = "2.21.7"
+
 dependencyManagement {
     imports {
         mavenBom(org.springframework.boot.gradle.plugin.SpringBootPlugin.BOM_COORDINATES)
