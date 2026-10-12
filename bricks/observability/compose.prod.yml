@@ -3,7 +3,7 @@
 # from bricks/observability/grafana (README.md).
 services:
   alloy:
-    image: grafana/alloy:v1.10.0
+    image: grafana/alloy:v1.20.1
     restart: unless-stopped
     command:
       - run
