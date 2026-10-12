@@ -83,7 +83,7 @@ services:
       com.centurylinklabs.watchtower.lifecycle.post-update-timeout: "4"
 
   db:
-    image: postgres:17-alpine
+    image: postgres:18-alpine
     restart: unless-stopped
     # Loopback only. Docker's iptables rules bypass the host firewall for a 0.0.0.0 bind, so this is the guard.
     ports:
