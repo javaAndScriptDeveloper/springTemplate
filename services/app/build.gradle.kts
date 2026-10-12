@@ -69,7 +69,7 @@ dependencies {
     implementation("org.springframework.cloud:spring-cloud-starter-circuitbreaker-resilience4j")
 
     // API Documentation (OpenAPI 3 / Swagger UI)
-    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.1.1")
 
     // Database migration. Boot 4 moved Liquibase auto-configuration into its own module: liquibase-core
     // alone is on the classpath but never runs a changeset.
@@ -97,11 +97,11 @@ dependencies {
     // Random, fully-populated test objects — the project convention over hand-built fixtures
     testImplementation("org.instancio:instancio-junit:5.4.1")
     // Architecture rules enforced as tests (layering, naming, no field injection)
-    testImplementation("com.tngtech.archunit:archunit-junit5:1.4.2")
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.5.1")
 
     constraints {
         // Transitive of spring-cloud-starter; 1.81.1 carries CVE-2026-8763 and CVE-2026-13506.
-        implementation("org.bouncycastle:bcprov-jdk18on:1.85") {
+        implementation("org.bouncycastle:bcprov-jdk18on:1.86") {
             because("CVE-2026-8763 / CVE-2026-13506 in the version spring-cloud-starter 5.0.2 pulls")
         }
     }

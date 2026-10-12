@@ -44,7 +44,7 @@ dependencies {
     compileOnly("com.fasterxml.jackson.core:jackson-annotations")
 
     // S3Client and S3Presigner appear in the public beans, so consumers see the SDK.
-    api("software.amazon.awssdk:s3:2.46.7")
+    api("software.amazon.awssdk:s3:2.55.13")
     implementation("org.springframework.boot:spring-boot-starter")
     // HealthIndicator; the brick stays web-free, spring-web is here only for ResponseStatusException.
     implementation("org.springframework.boot:spring-boot-health")
