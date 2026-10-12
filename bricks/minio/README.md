@@ -23,9 +23,10 @@ keys per feature. Settings: `MinioProperties`, env `APP_MINIO_ENDPOINT / ACCESS_
 - Presigned URLs embed `APP_MINIO_ENDPOINT` (`http://minio:9000` in prod): fine for server-side fetches, not for
   browsers: the app signs with `APP_MINIO_ENDPOINT`. If browsers must fetch, put MinIO behind a Caddy site and set
   that public URL as the endpoint.
-- Swap to Hetzner Object Storage / AWS: set `APP_MINIO_ENDPOINT`, `APP_MINIO_ACCESS_KEY`, `APP_MINIO_SECRET_KEY`,
-  `APP_MINIO_REGION` in `deploy/.env.prod`, delete the `minio` service and the `app` partial from
-  `bricks/minio/compose.prod.yml` (or remove the brick and keep the Java).
+- Swap to Hetzner Object Storage / AWS: keep the brick enabled (removing it drops the Java too), set
+  `APP_MINIO_ENDPOINT`, `APP_MINIO_ACCESS_KEY`, `APP_MINIO_SECRET_KEY`, `APP_MINIO_REGION` in `deploy/.env.prod`, and
+  delete the `minio` service and the `app` partial from `bricks/minio/compose.prod.yml` (or override the beans in the
+  app).
 
 ## Tests
 Gradle project `:bricks:minio` (`./gradlew :bricks:minio:test`). Unit: `ObjectStorageServiceTest` (mocked
@@ -35,8 +36,8 @@ Gradle project `:bricks:minio` (`./gradlew :bricks:minio:test`). Unit: `ObjectSt
 ## Change it
 The Java is the Gradle project `:bricks:minio` (`bricks/minio/java`, package `template.bricks.minio`). Override any
 bean (`S3Client`, `S3Presigner`, `ObjectStorageService`, `MinioHealthIndicator`) by defining your own. Dependencies:
-`java/build.gradle.kts`; Dependabot bumps them, then refresh the lockfile with
-`./gradlew :bricks:minio:dependencies --write-locks`. A second module using awssdk should move both to the AWS SDK
+`java/build.gradle.kts`; Dependabot bumps them, then `make lock` refreshes the lockfile (it covers every enabled
+brick). A second module using awssdk should move both to the AWS SDK
 BOM.
 
 Image: MinIO Inc. stopped publishing community images (`minio/minio` is no longer pullable), so the brick uses

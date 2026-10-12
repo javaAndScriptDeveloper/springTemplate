@@ -32,8 +32,9 @@ test: setup ## Run unit tests (no Docker needed)
 itest: ## Run integration tests (Testcontainers; one Postgres per fork)
 	./gradlew integrationTest
 
-lock: ## Refresh services/<service>/gradle.lockfile after changing dependencies
+lock: ## Refresh gradle.lockfile of services/<service> and of every enabled brick with Java
 	./gradlew :$(GRADLE_SERVICE):dependencies --write-locks -q
+	$(foreach b,$(BRICKS),$(if $(wildcard bricks/$(b)/java/build.gradle.kts),./gradlew :bricks:$(b):dependencies --write-locks -q;))
 
 release-name: ## Print the version the next push to main would release
 	@scripts/next-version.sh
