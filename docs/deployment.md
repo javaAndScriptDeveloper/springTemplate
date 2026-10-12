@@ -126,6 +126,7 @@ Re-do this sum when adding a service or raising a limit.
 | Task | Command (on the VPS) |
 |---|---|
 | Status / logs | `make prod-ps`, `make prod-logs SERVICE=app` |
+| Validate env and compose (every `:?` guard, brick overrides) | `make prod-config` |
 | Pull now instead of waiting for Watchtower | `make prod-pull` |
 | Stop everything (volumes kept) | `make prod-down` |
 | Database shell | from your machine: `make vps-psql`; on the VPS: `docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod exec db psql -U app app` |

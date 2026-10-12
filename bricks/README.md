@@ -17,6 +17,7 @@ wires it in, `make remove BRICK=<name>` takes it out without residue, `make bric
 | `README.md` (required) | Nothing. First line `# <name>: <one line>` is what `make bricks` prints. Sections: Use it, Operate it, Invariants, Tests, Change it. |
 | `compose.yml` | `include:` entry in root `compose.yml` (`# brick:<name>` marker). Paths inside are relative to the brick folder. |
 | `compose.prod.yml` | `include:` entry in `deploy/compose.prod.yml`. Reaches a running host only via `git pull`, the `.env.prod` block and `make prod-up` ([deployment.md](../docs/deployment.md)); brick Java must boot and degrade when its service is absent (minio does; only its health flips). |
+| `override.yml` / `override.prod.yml` | Partial definitions of core services (`app`, `db`): `environment`, `depends_on`, `volumes` only, no paths. The Makefile adds them as `-f` files while the brick is enabled (`make print-prod` shows the command); nothing is copied or edited. |
 | `env.example` / `env.prod.example` | Block appended to `.env.example` / `deploy/.env.prod.example` between `# --- brick:<name> ---` and `# --- /brick:<name> ---`. An empty `X_PASSWORD=` line is filled by `make prod-init`. |
 | `Makefile` | Included by the root Makefile while enabled (nothing is copied). Convention: start with `# --- brick: <name>`; use `##` help comments; may use `PROD`, `ENV_FILE`, `SERVICE`. |
 | `brick.gradle.kts` | Applied to the service build while enabled; `add`/`remove` refresh `services/app/gradle.lockfile`. Use `"implementation"(project(":bricks:<name>"))` to depend on the brick's Java (string-invoked; no type-safe accessors). |
@@ -34,8 +35,9 @@ block-sequence `include:` with two-space `  - ` entries in the root compose file
    declarations). Never `depends_on` another brick; share through declared volumes.
 2. Prod services: `mem_limit`, the json-file logging block (anchors do not cross files), label
    `com.centurylinklabs.watchtower.enable: "false"`. State the memory in the README.
-3. Extending `app` or `db`: a partial service with `environment`, `depends_on`, `volumes` only. Never `image`,
-   `ports`, `networks` of a core service.
+3. Extend a core service only in `override*.yml` (merged with `-f`); never redefine `app`/`db` inside `compose*.yml`
+   (Compose < 5 rejects it). Partials hold `environment`, `depends_on`, `volumes` only; never `image`, `ports`,
+   `networks` of a core service.
 4. `:?` guards are right in brick prod files: an enabled brick is on.
 5. Spring settings through `@ConfigurationProperties` records with `@DefaultValue`, bound from `APP_<BRICK>_*` env
    by relaxed binding. Never edit `application.yml`.

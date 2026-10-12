@@ -10,5 +10,6 @@ description: Add, remove, operate or author a brick (optional infrastructure und
 - Before touching a brick's files or operating it in prod: read `bricks/<name>/README.md` (it is the runbook).
 - Before writing a new brick: read `bricks/README.md` (anatomy, rules, checklist). Keep it self-contained; test the
   round trip; add it to the CI matrix.
+- A brick extends `app`/`db` only through `override.yml` / `override.prod.yml` (merged by the Makefile with `-f`), never inside `compose*.yml`; `make config` / `make prod-config` validate.
 - What add does, in order: compose includes → env blocks → skill → `.bricks` → app lockfile. A brick's `java/` is not
   copied: it is Gradle project `:bricks:<name>`, included by `settings.gradle.kts` while listed in `.bricks`. `scripts/brick.sh` is the source of truth.

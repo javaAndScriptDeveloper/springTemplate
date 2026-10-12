@@ -29,6 +29,19 @@ if make -s -C "$tmp" --no-print-directory demo-hello >/dev/null 2>&1; then fail 
 out="$(make -s -C "$tmp" --no-print-directory BRICKS=demo demo-hello)"
 [[ "$out" == "hello-from-demo" ]] || fail "BRICKS= override ignored"
 
+# Brick overrides (partials of core services) join the docker compose -f list; the Makefile is the one place that builds it.
+printf 'services:\n  app:\n    environment:\n      X: "1"\n' > "$tmp/bricks/demo/override.prod.yml"
+printf 'services:\n  app:\n    environment:\n      X: "1"\n' > "$tmp/bricks/demo/override.yml"
+printf 'demo\n' > "$tmp/.bricks"
+out="$(make -s -C "$tmp" --no-print-directory print-prod)"
+[[ "$out" == *"-f bricks/demo/override.prod.yml"* ]] || fail "prod override missing from print-prod: $out"
+[[ "$out" != *"-f bricks/demo/override.yml"* ]] || fail "local override leaked into print-prod: $out"
+out="$(make -s -C "$tmp" --no-print-directory PROD_ENV_FILE=x print-prod)"
+[[ "$out" == *"--env-file x"* ]] || fail "PROD_ENV_FILE not honoured: $out"
+printf '# nothing enabled\n' > "$tmp/.bricks"
+out="$(make -s -C "$tmp" --no-print-directory print-prod)"
+[[ "$out" != *override* ]] || fail "override listed with the brick disabled: $out"
+
 # The test runner runs brick tests whether or not the brick is enabled.
 out="$(bash "$tmp/scripts/tests/run.sh")"
 grep -q 'core-test-ran' <<<"$out" || fail "core test not run"

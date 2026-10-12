@@ -82,6 +82,7 @@ alerts, dashboard) and backups are bricks; their invariants live in their README
 - `APP_REPLICAS × DB_POOL_SIZE < max_connections (50)`.
 - `stop_grace_period` (45 s) > `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE` (30 s) < `WATCHTOWER_TIMEOUT` (60 s).
 - `deploy/.env.prod` required values carry `:?` guards; keep them when adding variables.
+- Brick partials of core services live in `override*.yml`; the Makefile is the only place that builds the `docker compose -f …` list (`make print-prod`).
 
 ## Process
 

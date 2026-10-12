@@ -166,8 +166,8 @@ jobs:
         if: steps.enabled.outputs.skip != 'true'
         run: |
           scripts/tests/run.sh
-          docker compose --env-file .env.example --profile full --profile observability config -q
-          docker compose -f deploy/compose.prod.yml --env-file scripts/tests/fixtures/env.prod.test config -q
+          make config
+          make prod-config PROD_ENV_FILE=scripts/tests/fixtures/env.prod.test
 
       - name: Remove the brick and prove nothing is left
         if: steps.enabled.outputs.skip != 'true'

@@ -5,10 +5,20 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
+# Compose < 5 rejects a service that an include: redefines (services.app conflicts with imported resource), so a
+# brick's partial of a core service belongs in override(.prod).yml, which -f merges. Static: needs no Docker.
+for f in "$root"/bricks/*/compose.yml "$root"/bricks/*/compose.prod.yml; do
+  [[ -f "$f" ]] || continue
+  if grep -qE '^  (app|db|caddy|watchtower):' "$f"; then
+    fail "brick ${f#"$root"/} redefines a core service inside an include: move the partial to override(.prod).yml"
+  fi
+done
+
 if ! docker info >/dev/null 2>&1; then echo "deploy-config: skipped (no docker)"; exit 0; fi
 
 fixture_env="$here/fixtures/env.prod.test"
-prod() { docker compose -f "$1/deploy/compose.prod.yml" --env-file "${2:-$fixture_env}" config "${@:3}"; }
+# Renders through the Makefile, the one place that builds the -f list (core file plus each brick's override.prod.yml).
+prod() { (cd "$1" && eval "$(make -s --no-print-directory print-prod PROD_ENV_FILE="${2:-$fixture_env}") config ${*:3}"); }
 
 # Lines of one top-level service in a rendered config (a plain awk range would end on its own first line).
 svc_block() { awk -v s="$1" '$0 ~ "^  " s ":" {f=1; next} f && /^  [a-z]/ {f=0} f'; }
@@ -27,7 +37,8 @@ core="$tmp/core"; scratch "$core"
 for b in $(grep -vE '^\s*(#|$)' "$core/.bricks" 2>/dev/null || true); do (cd "$core" && GRADLE=./gradlew scripts/brick.sh remove "$b" >/dev/null) || fail "brick remove failed for $b"; done
 
 # --- core, no bricks ---------------------------------------------------------------------------------------------
-docker compose -f "$core/compose.yml" --env-file "$core/.env.example" --profile full config -q || fail "compose.yml does not validate"
+make -s -C "$core" config || fail "compose.yml does not validate"
+make -s -C "$core" prod-config PROD_ENV_FILE="$fixture_env" || fail "make prod-config fails with the fixture env"
 prod "$core" "$fixture_env" -q || fail "deploy/compose.prod.yml does not validate with the fixture env"
 if prod "$core" /dev/null -q 2>/dev/null; then fail "compose.prod.yml validated with no environment; a required variable lost its :? guard"; fi
 rendered="$(prod "$core")"
@@ -47,8 +58,9 @@ docker run --rm -v "$root/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" -e DOMAIN=ex
 copy="$tmp/repo"; scratch "$copy"
 for d in "$copy"/bricks/*/; do (cd "$copy" && GRADLE=./gradlew scripts/brick.sh add "$(basename "$d")" >/dev/null) || fail "brick add failed for $d"; done
 
-docker compose -f "$copy/compose.yml" --env-file "$copy/.env.example" --profile full --profile observability config -q \
+make -s -C "$copy" config \
   || fail "compose.yml with every brick does not validate"
+make -s -C "$copy" prod-config PROD_ENV_FILE="$fixture_env" || fail "make prod-config with every brick fails"
 prod "$copy" "$fixture_env" -q || fail "compose.prod.yml with every brick does not validate"
 if prod "$copy" /dev/null -q 2>/dev/null; then fail "with every brick, an empty env validated; a :? guard is gone"; fi
 all="$(prod "$copy")"

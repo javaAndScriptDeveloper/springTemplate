@@ -27,16 +27,6 @@ services:
     labels:
       com.centurylinklabs.watchtower.enable: "false"
 
-  app:
-    environment:
-      APP_MINIO_ENDPOINT: http://minio:9000
-      APP_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio}
-      APP_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?run make prod-init (generates MINIO_ROOT_PASSWORD)}
-      APP_MINIO_BUCKET: ${APP_MINIO_BUCKET:-app}
-    depends_on:
-      minio:
-        condition: service_healthy
-
 networks:
   data:
 

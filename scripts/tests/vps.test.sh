@@ -46,7 +46,9 @@ grep -q -- "-L 15432:127.0.0.1:5433" "$SSH_LOG" && fail "tunnel opened despite -
 : > "$SSH_LOG"
 "$script" ps >/dev/null
 grep -q "cd /srv/app" "$SSH_LOG" || fail "ps did not cd into VPS_APP_DIR: $(cat "$SSH_LOG")"
-grep -q "compose.prod.yml" "$SSH_LOG" || fail "ps did not use the prod compose file: $(cat "$SSH_LOG")"
+grep -q 'make -s --no-print-directory print-prod) ps' "$SSH_LOG" \
+  || fail "ps did not run the Makefile's prod command (make print-prod): $(cat "$SSH_LOG")"
+grep -q -- "-f deploy/compose.prod.yml" "$SSH_LOG" && fail "vps.sh builds its own compose -f list; only the Makefile may: $(cat "$SSH_LOG")"
 
 # deploy-status: one backup line, three states.
 out="$(FAKE_BRICKS=observability "$script" deploy-status)"
@@ -59,6 +61,6 @@ out="$(FAKE_BRICKS=$'observability\nbackup' FAKE_BACKUP_RC=1 FAKE_BACKUP_STATUS=
 # backup-status: runs status and passes its exit code through.
 : > "$SSH_LOG"
 if FAKE_BACKUP_RC=1 "$script" backup-status >/dev/null; then fail "backup-status hid a stale backup"; fi
-grep -q -- "run --rm -T backup status" "$SSH_LOG" || fail "backup-status command: $(cat "$SSH_LOG")"
+grep -q -- "print-prod) run --rm -T backup status" "$SSH_LOG" || fail "backup-status command: $(cat "$SSH_LOG")"
 
 echo "vps: all passed"

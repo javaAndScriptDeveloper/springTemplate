@@ -1,16 +1,23 @@
 .DEFAULT_GOAL := help
 .PHONY: help setup run dev test itest test-scripts build format check lock release-name db-up db-down up down image clean \
-	prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-rollback vps-ssh vps-ps vps-logs vps-status vps-psql vps-datagrip rename bricks add remove
+	config prod-config print-prod prod-init prod-up prod-down prod-ps prod-logs prod-pull prod-rollback vps-ssh vps-ps vps-logs vps-status vps-psql vps-datagrip rename bricks add remove
 
 # Prefer .env if present, otherwise fall back to the committed example.
 ENV_FILE := $(if $(wildcard .env),.env,.env.example)
 # Local image tag; CI publishes ghcr.io/<owner>/<repo> instead.
 APP_NAME := $(shell basename $(CURDIR))
-# Production stack (run these on the VPS). Everything reads deploy/.env.prod, created by `make prod-init`.
-PROD := docker compose -f deploy/compose.prod.yml --env-file deploy/.env.prod
 # Enabled bricks (bricks/README.md): names from .bricks, comments and blanks dropped. Each enabled brick's Makefile
 # is included at the bottom of this file, so its targets show up in `make help`.
 BRICKS ?= $(shell sed -e 's/\#.*//' -e '/^[[:space:]]*$$/d' .bricks 2>/dev/null)
+# Brick partials of core services (bricks/README.md): merged with -f, never through include (Compose < 5 rejects that).
+BRICK_OVERRIDES      := $(foreach b,$(BRICKS),$(wildcard bricks/$(b)/override.yml))
+BRICK_PROD_OVERRIDES := $(foreach b,$(BRICKS),$(wildcard bricks/$(b)/override.prod.yml))
+PROD_ENV_FILE ?= deploy/.env.prod
+# Local stack: every docker compose call below goes through COMPOSE (and brick Makefiles, too).
+COMPOSE := docker compose -f compose.yml $(addprefix -f ,$(BRICK_OVERRIDES)) --env-file $(ENV_FILE)
+# Production stack (run these on the VPS). Reads deploy/.env.prod, created by `make prod-init`.
+# The one place that builds this list: scripts/vps.sh runs `make print-prod` on the VPS instead of repeating it.
+PROD := docker compose -f deploy/compose.prod.yml $(addprefix -f ,$(BRICK_PROD_OVERRIDES)) --env-file $(PROD_ENV_FILE)
 # Gradle project under services/ that run/dev/lock/up/image address (SERVICE is the logs filter below).
 GRADLE_SERVICE ?= app
 
@@ -52,17 +59,20 @@ check: ## Verify formatting without changing files
 	./gradlew spotlessCheck
 
 db-up: ## Start the local Postgres in the background
-	docker compose --env-file $(ENV_FILE) up -d db
+	$(COMPOSE) up -d db
 
 db-down: ## Stop the local Postgres
-	docker compose stop db
+	$(COMPOSE) stop db
 
 up: ## Build the jar + image and run app + db with $(ENV_FILE)
 	./gradlew :$(GRADLE_SERVICE):bootJar -q
-	docker compose --env-file $(ENV_FILE) --profile full up --build -d
+	$(COMPOSE) --profile full up --build -d
 
 down: ## Stop the full stack
-	docker compose --profile full down
+	$(COMPOSE) --profile full down
+
+config: ## Validate the local compose stack with every enabled brick's override (profiles: full + brick names)
+	$(COMPOSE) $(addprefix --profile ,full $(BRICKS)) config -q
 
 image: ## Build the jar and the OCI image (tag: $(APP_NAME))
 	./gradlew :$(GRADLE_SERVICE):bootJar -q
@@ -112,6 +122,12 @@ rename: ## Make the template yours: make rename PKG=com.acme.shop APP=shop
 
 prod-init: ## Create deploy/.env.prod with a generated DB password (asks for confirmation)
 	scripts/init-prod-env.sh
+
+prod-config: ## Validate the production stack (PROD_ENV_FILE=… to use another env file)
+	$(PROD) config -q
+
+print-prod: # Print the production docker compose command (scripts/vps.sh evals it on the VPS)
+	@echo '$(PROD)'
 
 prod-up: ## Validate deploy/.env.prod, then start/refresh the production stack and wait for health
 	$(PROD) config -q

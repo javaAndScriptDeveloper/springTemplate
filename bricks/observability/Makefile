@@ -1,9 +1,9 @@
 # --- brick: observability
 observability-up: ## Start local Prometheus + Grafana (http://localhost:3000) + Alloy
-	docker compose --env-file $(ENV_FILE) --profile observability up -d
+	$(COMPOSE) --profile observability up -d
 
 observability-down: ## Stop the local observability stack
-	docker compose --profile observability down
+	$(COMPOSE) --profile observability down
 
 grafana-push: ## Push bricks/observability/grafana/** to the local Grafana (http://localhost:3000)
 	bricks/observability/grafana-push.sh local
