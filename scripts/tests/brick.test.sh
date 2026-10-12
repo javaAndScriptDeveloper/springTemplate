@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Exercises scripts/brick.sh against a fixture repository: add, add again, remove, remove again, unknown brick,
-# package substitution, include insertion/removal, env marker blocks, skill install, lockfile refresh.
+# include insertion/removal, env marker blocks, skill install, lockfile refresh, and that a brick's Java is never
+# copied into the service (it is a Gradle subproject, included by settings.gradle.kts).
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/../.." && pwd)"
@@ -9,7 +10,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
 repo="$tmp/repo"
 mkdir -p "$repo/scripts" "$repo/deploy" "$repo/services/app/src/main/java" "$repo/services/app/src/test/java" \
-  "$repo/bricks/demo/java/main/config" "$repo/bricks/demo/java/test/unit" "$repo/bricks/demo/resources/main" \
+  "$repo/bricks/demo/java/src/main/java/template/bricks/demo" \
   "$repo/bricks/demo/skill" "$repo/bricks/demo2" "$repo/.claude/skills"
 cp "$root/scripts/brick.sh" "$repo/scripts/"
 cat > "$repo/gradlew" <<'EOF'
@@ -31,9 +32,8 @@ printf 'services:\n  demo:\n    image: alpine\n' > "$repo/bricks/demo/compose.ym
 printf 'services:\n  demo:\n    image: alpine\n' > "$repo/bricks/demo/compose.prod.yml"
 printf 'DEMO_PORT=1234\n' > "$repo/bricks/demo/env.example"
 printf 'DEMO_SECRET=\n' > "$repo/bricks/demo/env.prod.example"
-printf 'package __PKG__.config;\n\nimport __PKG__.utils.X;\n\npublic class DemoConfig {}\n' > "$repo/bricks/demo/java/main/config/DemoConfig.java"
-printf 'package __PKG__.unit;\n\nclass DemoTest {}\n' > "$repo/bricks/demo/java/test/unit/DemoTest.java"
-printf 'hello\n' > "$repo/bricks/demo/resources/main/demo.txt"
+printf 'plugins { id("java-library") }\n' > "$repo/bricks/demo/java/build.gradle.kts"
+printf 'package template.bricks.demo;\n\npublic class DemoConfig {}\n' > "$repo/bricks/demo/java/src/main/java/template/bricks/demo/DemoConfig.java"
 printf -- '---\nname: demo\n---\n' > "$repo/bricks/demo/skill/SKILL.md"
 printf 'dependencies { "implementation"("x:y:1") }\n' > "$repo/bricks/demo/brick.gradle.kts"
 # Brick "demo2": only an env block, to test ordering and removal in the middle.
@@ -53,6 +53,7 @@ grep -q '\[ \] demo .*a brick with everything' <<<"$out" || fail "list line for 
 
 # add wires everything.
 : > "$GRADLE_LOG"
+app_before="$(cd "$repo" && find services/app -type f | sort)"
 b add demo >/dev/null
 grep -qx 'demo' "$repo/.bricks" || fail ".bricks not updated"
 grep -q '^include:$' "$repo/compose.yml" || fail "include: key not inserted into compose.yml"
@@ -63,15 +64,11 @@ grep -q '^  - ../bricks/demo/compose.prod.yml  # brick:demo$' "$repo/deploy/comp
 grep -q '^# --- brick:demo ---$' "$repo/.env.example" && grep -q '^DEMO_PORT=1234$' "$repo/.env.example" \
   && grep -q '^# --- /brick:demo ---$' "$repo/.env.example" || fail "env block not appended"
 grep -q '^DEMO_SECRET=$' "$repo/deploy/.env.prod.example" || fail "prod env block not appended"
-f="$repo/services/app/src/main/java/com/acme/shop/config/DemoConfig.java"
-[[ -f "$f" ]] || fail "java not copied to the package path"
-grep -q '^package com.acme.shop.config;' "$f" || fail "__PKG__ not substituted in package"
-grep -q '^import com.acme.shop.utils.X;' "$f" || fail "__PKG__ not substituted in import"
-[[ -f "$repo/services/app/src/test/java/com/acme/shop/unit/DemoTest.java" ]] || fail "test java not copied"
-[[ -f "$repo/services/app/src/main/resources/demo.txt" ]] || fail "resources not copied"
+[[ "$app_before" == "$(cd "$repo" && find services/app -type f | sort)" ]] || fail "add touched files under services/app"
+[[ -f "$repo/bricks/demo/java/src/main/java/template/bricks/demo/DemoConfig.java" ]] || fail "brick java moved"
 [[ -f "$repo/.claude/skills/demo/SKILL.md" ]] || fail "skill not installed"
 grep -q 'dependencies --write-locks' "$GRADLE_LOG" || fail "lockfile not refreshed after add"
-grep -q 'spotlessApply' "$GRADLE_LOG" || fail "copied java not formatted"
+grep -q 'spotlessApply' "$GRADLE_LOG" && fail "add ran spotless although nothing is copied"
 out="$(b list)"; grep -q '\[x\] demo ' <<<"$out" || fail "list does not show demo enabled"
 
 # add twice is a no-op.
@@ -94,9 +91,7 @@ grep -qx 'demo' "$repo/.bricks" && fail ".bricks still lists demo"
 grep -q 'brick:demo$' "$repo/compose.yml" && fail "compose include line left"
 grep -q '^include:' "$repo/compose.yml" && fail "empty include: key left in compose.yml"
 grep -q 'brick:demo$' "$repo/deploy/compose.prod.yml" && fail "prod include line left"
-[[ ! -e "$f" ]] || fail "copied java not deleted"
-[[ ! -d "$repo/services/app/src/main/java/com/acme/shop/config" ]] || fail "empty package dir left behind"
-[[ ! -e "$repo/services/app/src/main/resources/demo.txt" ]] || fail "copied resource not deleted"
+[[ "$app_before" == "$(cd "$repo" && find services/app -type f | sort)" ]] || fail "remove touched files under services/app"
 [[ ! -d "$repo/.claude/skills/demo" ]] || fail "skill dir not removed"
 [[ "$(grep -c 'dependencies --write-locks' "$GRADLE_LOG")" -ge 2 ]] || fail "lockfile not refreshed after remove"
 if b remove demo >/dev/null 2>&1; then fail "second remove exited 0"; fi
@@ -128,7 +123,6 @@ grep -qx 'demo' "$repo/.bricks" || fail ".bricks lost demo after a failed lock r
 if out="$(GRADLE_FAIL=1 b remove demo 2>&1)"; then fail "remove exited 0 although the lockfile refresh failed"; fi
 grep -q 'make lock' <<<"$out" || fail "remove failure does not mention make lock: $out"
 grep -qx 'demo' "$repo/.bricks" && fail ".bricks still lists demo after remove"
-[[ ! -e "$f" ]] || fail "remove failure left copied java behind"
 
 # The CI matrix is static; once the bricks job exists every brick directory must be in it.
 if grep -q '^  bricks:' "$root/.github/workflows/ci.yml"; then

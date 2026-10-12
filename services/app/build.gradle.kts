@@ -101,7 +101,8 @@ dependencies {
     }
 }
 
-// Bricks (bricks/README.md): each enabled brick may contribute dependencies through bricks/<name>/brick.gradle.kts.
+// Bricks (bricks/README.md): an enabled brick with Java is its own Gradle project (:bricks:<name>, settings.gradle.kts);
+// bricks/<name>/brick.gradle.kts is how this service depends on it.
 rootProject
     .file(".bricks")
     .takeIf { it.isFile }

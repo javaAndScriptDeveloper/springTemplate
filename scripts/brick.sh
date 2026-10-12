@@ -10,8 +10,7 @@
 #   compose.prod.yml       include: entry in deploy/compose.prod.yml
 #   env.example            block appended to .env.example                   markers: # --- brick:<name> --- … # --- /brick:<name> ---
 #   env.prod.example       block appended to deploy/.env.prod.example
-#   java/{main,test}/**    copied under services/<svc>/src/{main,test}/java/<package>/, __PKG__ → service package
-#   resources/{main,test}/** copied under services/<svc>/src/{main,test}/resources/
+#   java/build.gradle.kts  Gradle project :bricks:<name> (dir bricks/<name>/java), included by settings.gradle.kts while enabled
 #   skill/SKILL.md         copied to .claude/skills/<name>/SKILL.md
 #   brick.gradle.kts       applied by the service build for every name in .bricks; the lockfile is refreshed here
 #   Makefile               included by the root Makefile for every name in .bricks; nothing to copy
@@ -26,16 +25,10 @@ service_dir="services/${service}"
 bricks_file=".bricks"
 gradle="${GRADLE:-./gradlew}"
 
-usage() { sed -n '2,19p' "$0" >&2; exit 2; }
+usage() { sed -n '2,18p' "$0" >&2; exit 2; }
 die() { echo "brick: $*" >&2; exit 1; }
 
 enabled() { [[ -f "$bricks_file" ]] && grep -qx "$1" "$bricks_file"; }
-service_package() {
-  local pkg
-  pkg="$(sed -n 's/^group = "\(.*\)"$/\1/p' "$service_dir/build.gradle.kts")"
-  [[ -n "$pkg" ]] || die "cannot read 'group = \"…\"' from $service_dir/build.gradle.kts"
-  printf '%s' "$pkg"
-}
 
 # --- compose include lines ------------------------------------------------------------------------------------------
 include_add() { # file, include path, brick
@@ -77,35 +70,7 @@ block_remove() { # file, brick
   echo "  ~ $file: block removed"
 }
 
-# --- java / resources -----------------------------------------------------------------------------------------------
-# Walks bricks/<b>/<kind>/<set> and calls "$4 <src file> <dst file>" for every file.
-each_file() { # brick, kind (java|resources), set (main|test), callback
-  local b="$1" kind="$2" set="$3" cb="$4" src dst f rel
-  src="bricks/${b}/${kind}/${set}"
-  [[ -d "$src" ]] || return 0
-  if [[ "$kind" == java ]]; then dst="$service_dir/src/${set}/java/$(service_package | tr . /)"; else dst="$service_dir/src/${set}/resources"; fi
-  while IFS= read -r -d '' f; do
-    rel="${f#"$src"/}"
-    "$cb" "$f" "$dst/$rel"
-  done < <(find "$src" -type f -print0 | sort -z)
-}
-copy_one() { # src, dst
-  local pkg; pkg="$(service_package)"
-  mkdir -p "$(dirname "$2")"
-  sed "s/__PKG__/${pkg}/g" "$1" > "$2"
-  echo "  + $2"
-}
-delete_one() { # src, dst
-  [[ -e "$2" ]] || return 0
-  rm -f "$2"; echo "  - $2"
-  # Prune directories the brick left empty, up to the source root.
-  local d; d="$(dirname "$2")"
-  while [[ "$d" == "$service_dir"/src/* ]] && rmdir "$d" 2>/dev/null; do d="$(dirname "$d")"; done
-}
-has_java() { [[ -d "bricks/$1/java" ]]; }
-
 refresh_lock() { "$gradle" ":${service}:dependencies" --write-locks -q && echo "  ~ $service_dir/gradle.lockfile refreshed"; }
-format_java() { "$gradle" ":${service}:spotlessApply" -q && echo "  ~ copied Java formatted"; }
 
 check_name() { # brick
   [[ "$1" =~ ^[a-z0-9][a-z0-9-]*$ ]] || die "brick name must match ^[a-z0-9][a-z0-9-]*\$"
@@ -134,15 +99,13 @@ cmd_add() {
   [[ -f "bricks/$b/compose.prod.yml" ]] && include_add deploy/compose.prod.yml "../bricks/$b/compose.prod.yml" "$b"
   [[ -f "bricks/$b/env.example" ]] && block_add .env.example "bricks/$b/env.example" "$b"
   [[ -f "bricks/$b/env.prod.example" ]] && block_add deploy/.env.prod.example "bricks/$b/env.prod.example" "$b"
-  each_file "$b" java main copy_one; each_file "$b" java test copy_one
-  each_file "$b" resources main copy_one; each_file "$b" resources test copy_one
   if [[ -f "bricks/$b/skill/SKILL.md" ]]; then mkdir -p ".claude/skills/$b"; cp "bricks/$b/skill/SKILL.md" ".claude/skills/$b/SKILL.md"; echo "  + .claude/skills/$b/SKILL.md"; fi
   [[ -s "$bricks_file" && $(tail -c1 "$bricks_file" | wc -l) -eq 0 ]] && echo >> "$bricks_file"
   echo "$b" >> "$bricks_file"; echo "  ~ $bricks_file: + $b"
   if [[ -f "bricks/$b/brick.gradle.kts" ]]; then
-    refresh_lock || die "lockfile refresh failed; the brick's files are in place: fix the cause, then: make lock && make format"
+    refresh_lock || die "lockfile refresh failed; the brick's files are in place: fix the cause, then: make lock"
   fi
-  has_java "$b" && format_java
+  [[ -f "bricks/$b/java/build.gradle.kts" ]] && echo "  ~ bricks/$b/java is now Gradle project :bricks:$b"
   echo "Enabled '$b'. Read bricks/$b/README.md, then: make build && make test-scripts"
 }
 
@@ -156,8 +119,6 @@ cmd_remove() {
   include_remove deploy/compose.prod.yml "$b"
   block_remove .env.example "$b"
   block_remove deploy/.env.prod.example "$b"
-  each_file "$b" java main delete_one; each_file "$b" java test delete_one
-  each_file "$b" resources main delete_one; each_file "$b" resources test delete_one
   if [[ -f "bricks/$b/skill/SKILL.md" ]]; then rm -rf ".claude/skills/$b"; echo "  - .claude/skills/$b/"; fi
   sed -i "/^${b}\$/d" "$bricks_file"; echo "  ~ $bricks_file: - $b"
   if [[ -f "bricks/$b/brick.gradle.kts" ]]; then

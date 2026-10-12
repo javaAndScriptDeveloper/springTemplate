@@ -14,7 +14,7 @@ repositories {
 
 spotless {
     kotlinGradle {
-        target("*.gradle.kts", "services/*/*.gradle.kts", "bricks/*/*.gradle.kts")
+        target("*.gradle.kts", "services/*/*.gradle.kts", "bricks/*/*.gradle.kts", "bricks/*/java/*.gradle.kts")
         ktlint()
     }
 }
