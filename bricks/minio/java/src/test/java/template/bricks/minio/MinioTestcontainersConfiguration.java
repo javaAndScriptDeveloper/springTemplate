@@ -1,4 +1,4 @@
-package __PKG__;
+package template.bricks.minio;
 
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
@@ -6,7 +6,7 @@ import org.springframework.test.context.DynamicPropertyRegistrar;
 import org.testcontainers.containers.MinIOContainer;
 import org.testcontainers.utility.DockerImageName;
 
-/** A MinIO container for integration tests of the minio brick; import next to {@link TestcontainersConfiguration}. */
+/** A MinIO container for integration tests of the minio brick. */
 @TestConfiguration(proxyBeanMethods = false)
 public class MinioTestcontainersConfiguration {
 

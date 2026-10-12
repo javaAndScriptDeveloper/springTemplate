@@ -1,4 +1,4 @@
-package __PKG__.unit;
+package template.bricks.minio;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -7,14 +7,12 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import __PKG__.config.MinioProperties;
-import __PKG__.exception.ApplicationException;
-import __PKG__.service.ObjectStorageService;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.ArgumentMatchers;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.server.ResponseStatusException;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
@@ -69,9 +67,9 @@ class ObjectStorageServiceTest {
                 .thenThrow(NoSuchKeyException.builder().build());
 
         assertThatThrownBy(() -> service.get("nope"))
-                .isInstanceOf(ApplicationException.class)
+                .isInstanceOf(ResponseStatusException.class)
                 .hasMessageContaining("nope")
-                .extracting("status")
+                .extracting("statusCode")
                 .isEqualTo(HttpStatus.NOT_FOUND);
     }
 
@@ -81,8 +79,8 @@ class ObjectStorageServiceTest {
                 .thenThrow(NoSuchBucketException.builder().build());
 
         assertThatThrownBy(() -> service.get("x"))
-                .isInstanceOf(ApplicationException.class)
-                .extracting("status")
+                .isInstanceOf(ResponseStatusException.class)
+                .extracting("statusCode")
                 .isEqualTo(HttpStatus.NOT_FOUND);
     }
 

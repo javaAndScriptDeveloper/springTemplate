@@ -1,13 +1,11 @@
-package __PKG__.service;
+package template.bricks.minio;
 
-import __PKG__.config.MinioProperties;
-import __PKG__.exception.ApplicationException;
 import java.net.URL;
 import java.time.Duration;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
-import org.springframework.stereotype.Service;
+import org.springframework.web.server.ResponseStatusException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.BucketAlreadyExistsException;
@@ -23,7 +21,6 @@ import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignReques
  * Put, get, delete and presign objects in the configured bucket (minio brick). Creates the bucket on first use; a
  * missing key or bucket reads as 404, and delete is idempotent.
  */
-@Service
 @RequiredArgsConstructor
 @Slf4j
 public class ObjectStorageService {
@@ -48,7 +45,7 @@ public class ObjectStorageService {
         try {
             return s3.getObjectAsBytes(request).asByteArray();
         } catch (NoSuchKeyException | NoSuchBucketException e) {
-            throw new ApplicationException(HttpStatus.NOT_FOUND, "object not found: " + key, e);
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "object not found: " + key, e);
         }
     }
 

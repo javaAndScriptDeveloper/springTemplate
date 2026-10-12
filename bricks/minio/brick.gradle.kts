@@ -1,5 +1,4 @@
-// minio brick: S3 client (MinIO, Hetzner Object Storage or AWS) and a MinIO Testcontainer for integration tests.
+// minio brick: the application depends on the brick's Gradle project; its own build file owns the dependencies.
 dependencies {
-    "implementation"("software.amazon.awssdk:s3:2.46.7")
-    "testImplementation"("org.testcontainers:minio")
+    "implementation"(project(":bricks:minio"))
 }

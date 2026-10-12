@@ -1,15 +1,13 @@
-package __PKG__.config;
+package template.bricks.minio;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.health.contributor.Health;
 import org.springframework.boot.health.contributor.HealthIndicator;
-import org.springframework.stereotype.Component;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 
 /** /actuator/health shows the object store (minio brick): UP when the endpoint answers for the configured bucket.
  * Bucket-scoped on purpose: managed stores hand out credentials without {@code ListAllMyBuckets}. */
-@Component
 @RequiredArgsConstructor
 public class MinioHealthIndicator implements HealthIndicator {
 

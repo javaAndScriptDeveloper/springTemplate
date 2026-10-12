@@ -1,4 +1,4 @@
-package __PKG__.config;
+package template.bricks.minio;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
